@@ -3,6 +3,7 @@ module github.com/XrystikLK/template
 go 1.26.0
 
 tool (
+	github.com/joho/godotenv/cmd/godotenv
 	github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen
 	github.com/pressly/goose/v3/cmd/goose
 )

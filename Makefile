@@ -15,3 +15,7 @@ create:
 
 migrate-up:
 	goose -dir $(MIGRATIONS_DIR) postgres "$(DATABASE_URL)" up
+	
+migrate-down:
+	goose -dir $(MIGRATIONS_DIR) postgres "$(DATABASE_URL)" down
+

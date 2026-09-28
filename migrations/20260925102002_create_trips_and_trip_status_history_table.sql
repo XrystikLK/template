@@ -1,7 +1,4 @@
 -- +goose Up
--- +goose StatementBegin
-SELECT 'up SQL query';
--- +goose StatementEnd
 CREATE TABLE trips (
     id              UUID PRIMARY KEY,
     user_id         UUID NOT NULL,
@@ -42,6 +39,5 @@ CREATE INDEX trip_status_history_trip_changed_idx
 
 
 -- +goose Down
--- +goose StatementBegin
-SELECT 'down SQL query';
--- +goose StatementEnd
+DROP TABLE IF EXISTS trip_status_history;
+DROP TABLE IF EXISTS trips;
