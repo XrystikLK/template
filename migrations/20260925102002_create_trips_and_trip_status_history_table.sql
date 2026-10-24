@@ -24,6 +24,7 @@ CREATE TABLE trips (
 );
 
 CREATE INDEX trips_status_started_at_idx ON trips (status, started_at);
+CREATE UNIQUE INDEX trips_driver_active_idx ON trips (driver_id) WHERE status = 'active';
 
 CREATE TABLE trip_status_history (
     id          BIGSERIAL PRIMARY KEY,
@@ -39,5 +40,6 @@ CREATE INDEX trip_status_history_trip_changed_idx
 
 
 -- +goose Down
+DROP INDEX IF EXISTS trips_driver_active_idx;
 DROP TABLE IF EXISTS trip_status_history;
 DROP TABLE IF EXISTS trips;

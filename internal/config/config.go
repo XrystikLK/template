@@ -9,6 +9,7 @@ import (
 
 type Config struct {
 	HTTPAddr                string
+	ShutdownTimeout         string
 	DatabaseURL             string
 	DatabaseMaxConns        string
 	DatabaseMinConns        string
@@ -16,7 +17,6 @@ type Config struct {
 	DatabaseConnectTimeout  string
 	DatabaseQueryTimeout    string
 }
-
 
 func Load() (*Config, error) {
 	_ = godotenv.Load()
@@ -28,6 +28,7 @@ func Load() (*Config, error) {
 
 	return &Config{
 		HTTPAddr:                os.Getenv("HTTP_ADDR"),
+		ShutdownTimeout:         os.Getenv("SHUTDOWN_TIMEOUT"),
 		DatabaseURL:             dbURL,
 		DatabaseMaxConns:        os.Getenv("DATABASE_MAX_CONNS"),
 		DatabaseMinConns:        os.Getenv("DATABASE_MIN_CONNS"),
