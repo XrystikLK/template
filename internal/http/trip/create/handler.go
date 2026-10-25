@@ -3,19 +3,27 @@ package create
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 
 	domainTrip "github.com/XrystikLK/template/internal/domain/trip"
 	api "github.com/XrystikLK/template/internal/generated"
 	"github.com/XrystikLK/template/internal/http/domainerror"
+	"github.com/XrystikLK/template/internal/infra/telemetry"
 )
 
 type Handler struct {
-	uc useCase
+	uc      useCase
+	logger  *slog.Logger
+	metrics *telemetry.Metrics
 }
 
-func New(uc useCase) *Handler {
-	return &Handler{uc: uc}
+func New(uc useCase, logger *slog.Logger, metrics *telemetry.Metrics) *Handler {
+	return &Handler{
+		uc:      uc,
+		logger:  logger,
+		metrics: metrics,
+	}
 }
 
 func (h *Handler) Handle(w http.ResponseWriter, r *http.Request) {
@@ -36,9 +44,15 @@ func (h *Handler) Handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if h.logger != nil {
+		h.logger.InfoContext(r.Context(), "trip created", slog.String("trip_id", tripModel.ID.String()))
+	}
+	if h.metrics != nil && h.metrics.TripsCreated != nil {
+		h.metrics.TripsCreated.Add(r.Context(), 1)
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Location", fmt.Sprintf("/api/v1/trips/%s", tripModel.ID.String()))
 	w.WriteHeader(http.StatusCreated)
 	_ = json.NewEncoder(w).Encode(toAPITrip(tripModel))
 }
-

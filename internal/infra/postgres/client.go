@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/XrystikLK/template/internal/config"
+	"github.com/exaring/otelpgx"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -14,6 +15,8 @@ func NewPool(ctx context.Context, cfg *config.Config) (*pgxpool.Pool, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	poolCfg.ConnConfig.Tracer = otelpgx.NewTracer()
 
 	if maxConns, err := strconv.Atoi(cfg.DatabaseMaxConns); err == nil && maxConns > 0 {
 		poolCfg.MaxConns = int32(maxConns)
@@ -40,4 +43,3 @@ func NewPool(ctx context.Context, cfg *config.Config) (*pgxpool.Pool, error) {
 
 	return pool, nil
 }
-

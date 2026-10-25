@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -28,16 +29,17 @@ func main() {
 		log.Fatal(err)
 	}
 
-	log.Printf("server starting on %s", app.Addr())
+	app.Logger().Info("service starting", slog.String("addr", app.Addr()))
 
 	go func() {
 		if err := app.Start(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Fatal(err)
+			app.Logger().Error("server error", slog.Any("error", err))
+			os.Exit(1)
 		}
 	}()
 
 	<-ctx.Done()
-	log.Printf("shutting down gracefully...")
+	app.Logger().Info("shutting down gracefully")
 
 	shutdownTimeout := 10 * time.Second
 	if cfg.ShutdownTimeout != "" {
@@ -50,6 +52,6 @@ func main() {
 	defer cancel()
 
 	if err := app.Shutdown(shutdownCtx); err != nil {
-		log.Printf("server shutdown error: %v", err)
+		app.Logger().Error("server shutdown error", slog.Any("error", err))
 	}
 }

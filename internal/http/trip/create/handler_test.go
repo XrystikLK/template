@@ -59,7 +59,7 @@ func TestCreateTripHandler(t *testing.T) {
 			Execute(gomock.Any(), gomock.Any()).
 			Return(returnedModel, nil)
 
-		h := createHandler.New(mockUC)
+		h := createHandler.New(mockUC, nil, nil)
 
 		bodyBytes, _ := json.Marshal(reqBody)
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/trips", bytes.NewReader(bodyBytes))
@@ -80,7 +80,7 @@ func TestCreateTripHandler(t *testing.T) {
 		defer ctrl.Finish()
 
 		mockUC := NewMockuseCase(ctrl)
-		h := createHandler.New(mockUC)
+		h := createHandler.New(mockUC, nil, nil)
 
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/trips", bytes.NewReader([]byte("{invalid-json")))
 		rec := httptest.NewRecorder()
@@ -101,7 +101,7 @@ func TestCreateTripHandler(t *testing.T) {
 			Execute(gomock.Any(), gomock.Any()).
 			Return(nil, domainTrip.ErrDriverBusy)
 
-		h := createHandler.New(mockUC)
+		h := createHandler.New(mockUC, nil, nil)
 
 		bodyBytes, _ := json.Marshal(reqBody)
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/trips", bytes.NewReader(bodyBytes))
@@ -123,7 +123,7 @@ func TestCreateTripHandler(t *testing.T) {
 			Execute(gomock.Any(), gomock.Any()).
 			Return(nil, errors.New("database timeout"))
 
-		h := createHandler.New(mockUC)
+		h := createHandler.New(mockUC, nil, nil)
 
 		bodyBytes, _ := json.Marshal(reqBody)
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/trips", bytes.NewReader(bodyBytes))
@@ -136,4 +136,3 @@ func TestCreateTripHandler(t *testing.T) {
 		}
 	})
 }
-
