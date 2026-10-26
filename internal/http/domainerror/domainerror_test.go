@@ -78,4 +78,3 @@ func TestWrite(t *testing.T) {
 		t.Fatalf("expected problem+json content type, got %s", rec.Header().Get("Content-Type"))
 	}
 }
-

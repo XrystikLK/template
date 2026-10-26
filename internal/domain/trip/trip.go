@@ -72,4 +72,3 @@ func (t *Trip) Finish(at time.Time) error {
 	t.UpdatedAt = at
 	return nil
 }
-

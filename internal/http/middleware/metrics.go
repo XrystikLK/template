@@ -1,17 +1,20 @@
 package middleware
 
 import (
+	"context"
 	"net/http"
 	"strconv"
 	"time"
 
-	"github.com/XrystikLK/template/internal/infra/telemetry"
 	"github.com/go-chi/chi/v5"
-	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/metric"
 )
 
-func Metrics(m *telemetry.Metrics) func(http.Handler) http.Handler {
+type ServerMetrics interface {
+	RecordRequestDuration(ctx context.Context, durationSec float64, method, route, statusCode string)
+	AddActiveRequests(ctx context.Context, delta int64, method, route string)
+}
+
+func Metrics(m ServerMetrics) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if m == nil {
@@ -25,13 +28,8 @@ func Metrics(m *telemetry.Metrics) func(http.Handler) http.Handler {
 				routePattern = r.URL.Path
 			}
 
-			activeAttrs := metric.WithAttributes(
-				attribute.String("http.request.method", r.Method),
-				attribute.String("http.route", routePattern),
-			)
-
-			m.ActiveRequests.Add(r.Context(), 1, activeAttrs)
-			defer m.ActiveRequests.Add(r.Context(), -1, activeAttrs)
+			m.AddActiveRequests(r.Context(), 1, r.Method, routePattern)
+			defer m.AddActiveRequests(r.Context(), -1, r.Method, routePattern)
 
 			rw := newResponseWriter(w)
 			next.ServeHTTP(rw, r)
@@ -42,14 +40,7 @@ func Metrics(m *telemetry.Metrics) func(http.Handler) http.Handler {
 			}
 
 			durationSec := time.Since(start).Seconds()
-			durationAttrs := metric.WithAttributes(
-				attribute.String("http.request.method", r.Method),
-				attribute.String("http.route", finalRoute),
-				attribute.String("http.response.status_code", strconv.Itoa(rw.Status())),
-			)
-
-			m.RequestDuration.Record(r.Context(), durationSec, durationAttrs)
+			m.RecordRequestDuration(r.Context(), durationSec, r.Method, finalRoute, strconv.Itoa(rw.Status()))
 		})
 	}
 }
-

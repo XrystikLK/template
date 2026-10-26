@@ -23,4 +23,3 @@ func New(pool *pgxpool.Pool, queryTimeout time.Duration) *Repository {
 		queryTimeout: queryTimeout,
 	}
 }
-

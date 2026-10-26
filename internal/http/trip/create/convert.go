@@ -42,4 +42,3 @@ func toAPITrip(t *model.Trip) api.Trip {
 		LastPositionAt: nil,
 	}
 }
-

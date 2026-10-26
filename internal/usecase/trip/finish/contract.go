@@ -5,8 +5,9 @@ import (
 	"context"
 	"time"
 
-	"github.com/XrystikLK/template/internal/model"
 	"github.com/google/uuid"
+
+	"github.com/XrystikLK/template/internal/model"
 )
 
 type (
@@ -19,4 +20,3 @@ type (
 		Do(ctx context.Context, fn func(ctx context.Context) error) error
 	}
 )
-

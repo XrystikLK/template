@@ -22,12 +22,13 @@ func main() {
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 
 	app, err := container.New(ctx, cfg)
 	if err != nil {
+		stop()
 		log.Fatal(err)
 	}
+	defer stop()
 
 	app.Logger().Info("service starting", slog.String("addr", app.Addr()))
 

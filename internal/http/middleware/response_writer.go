@@ -51,4 +51,3 @@ func (rw *responseWriter) Flush() {
 		flusher.Flush()
 	}
 }
-

@@ -7,11 +7,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+	"go.uber.org/mock/gomock"
+
 	domainTrip "github.com/XrystikLK/template/internal/domain/trip"
 	getHandler "github.com/XrystikLK/template/internal/http/trip/get"
 	"github.com/XrystikLK/template/internal/model"
-	"github.com/google/uuid"
-	"go.uber.org/mock/gomock"
 )
 
 func TestGetTripHandler(t *testing.T) {
@@ -88,4 +89,3 @@ func TestGetTripHandler(t *testing.T) {
 		}
 	})
 }
-

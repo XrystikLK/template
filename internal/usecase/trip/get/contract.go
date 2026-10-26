@@ -4,11 +4,11 @@ package get
 import (
 	"context"
 
-	"github.com/XrystikLK/template/internal/model"
 	"github.com/google/uuid"
+
+	"github.com/XrystikLK/template/internal/model"
 )
 
 type tripRepository interface {
 	GetByID(ctx context.Context, id uuid.UUID) (*model.Trip, error)
 }
-

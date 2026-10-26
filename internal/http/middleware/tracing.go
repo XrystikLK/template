@@ -48,4 +48,3 @@ func Tracing(tracer trace.Tracer) func(http.Handler) http.Handler {
 		})
 	}
 }
-

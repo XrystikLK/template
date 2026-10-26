@@ -5,18 +5,18 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/XrystikLK/template/internal/http/domainerror"
-	"github.com/XrystikLK/template/internal/infra/telemetry"
 	"github.com/google/uuid"
+
+	"github.com/XrystikLK/template/internal/http/domainerror"
 )
 
 type Handler struct {
 	uc      useCase
 	logger  *slog.Logger
-	metrics *telemetry.Metrics
+	metrics metrics
 }
 
-func New(uc useCase, logger *slog.Logger, metrics *telemetry.Metrics) *Handler {
+func New(uc useCase, logger *slog.Logger, metrics metrics) *Handler {
 	return &Handler{
 		uc:      uc,
 		logger:  logger,
@@ -34,8 +34,8 @@ func (h *Handler) Handle(w http.ResponseWriter, r *http.Request, tripID uuid.UUI
 	if h.logger != nil {
 		h.logger.InfoContext(r.Context(), "trip completed", slog.String("trip_id", tripModel.ID.String()))
 	}
-	if h.metrics != nil && h.metrics.TripsCompleted != nil {
-		h.metrics.TripsCompleted.Add(r.Context(), 1)
+	if h.metrics != nil {
+		h.metrics.IncTripsCompleted(r.Context())
 	}
 
 	w.Header().Set("Content-Type", "application/json")

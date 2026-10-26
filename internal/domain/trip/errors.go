@@ -19,4 +19,3 @@ type ValidationError struct {
 func (e *ValidationError) Error() string {
 	return fmt.Sprintf("validation error for field %s: %s", e.Field, e.Message)
 }
-

@@ -4,11 +4,17 @@ package finish
 import (
 	"context"
 
-	"github.com/XrystikLK/template/internal/model"
 	"github.com/google/uuid"
+
+	"github.com/XrystikLK/template/internal/model"
 )
 
-type useCase interface {
-	Execute(ctx context.Context, id uuid.UUID) (*model.Trip, error)
-}
+type (
+	useCase interface {
+		Execute(ctx context.Context, id uuid.UUID) (*model.Trip, error)
+	}
 
+	metrics interface {
+		IncTripsCompleted(ctx context.Context)
+	}
+)

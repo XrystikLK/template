@@ -5,9 +5,10 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/XrystikLK/template/internal/config"
 	"github.com/exaring/otelpgx"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/XrystikLK/template/internal/config"
 )
 
 func NewPool(ctx context.Context, cfg *config.Config) (*pgxpool.Pool, error) {
@@ -18,10 +19,10 @@ func NewPool(ctx context.Context, cfg *config.Config) (*pgxpool.Pool, error) {
 
 	poolCfg.ConnConfig.Tracer = otelpgx.NewTracer()
 
-	if maxConns, err := strconv.Atoi(cfg.DatabaseMaxConns); err == nil && maxConns > 0 {
+	if maxConns, err := strconv.ParseInt(cfg.DatabaseMaxConns, 10, 32); err == nil && maxConns > 0 {
 		poolCfg.MaxConns = int32(maxConns)
 	}
-	if minConns, err := strconv.Atoi(cfg.DatabaseMinConns); err == nil && minConns > 0 {
+	if minConns, err := strconv.ParseInt(cfg.DatabaseMinConns, 10, 32); err == nil && minConns > 0 {
 		poolCfg.MinConns = int32(minConns)
 	}
 	if maxLifetime, err := time.ParseDuration(cfg.DatabaseMaxConnLifetime); err == nil {

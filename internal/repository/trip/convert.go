@@ -1,8 +1,9 @@
 package trip
 
 import (
-	"github.com/XrystikLK/template/internal/model"
 	"github.com/jackc/pgx/v5"
+
+	"github.com/XrystikLK/template/internal/model"
 )
 
 func scanTrip(row pgx.Row) (*model.Trip, error) {
@@ -31,4 +32,3 @@ func scanTrip(row pgx.Row) (*model.Trip, error) {
 	t.Status = model.Status(status)
 	return &t, nil
 }
-

@@ -79,4 +79,3 @@ func Write(w http.ResponseWriter, r *http.Request, err error) {
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(body)
 }
-

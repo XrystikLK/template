@@ -1,6 +1,9 @@
 package telemetry
 
 import (
+	"context"
+
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 )
 
@@ -56,3 +59,37 @@ func NewMetrics(meter metric.Meter) (*Metrics, error) {
 	}, nil
 }
 
+func (m *Metrics) IncTripsCreated(ctx context.Context) {
+	if m != nil && m.TripsCreated != nil {
+		m.TripsCreated.Add(ctx, 1)
+	}
+}
+
+func (m *Metrics) IncTripsCompleted(ctx context.Context) {
+	if m != nil && m.TripsCompleted != nil {
+		m.TripsCompleted.Add(ctx, 1)
+	}
+}
+
+func (m *Metrics) RecordRequestDuration(ctx context.Context, durationSec float64, method, route, statusCode string) {
+	if m == nil || m.RequestDuration == nil {
+		return
+	}
+	attrs := metric.WithAttributes(
+		attribute.String("http.request.method", method),
+		attribute.String("http.route", route),
+		attribute.String("http.response.status_code", statusCode),
+	)
+	m.RequestDuration.Record(ctx, durationSec, attrs)
+}
+
+func (m *Metrics) AddActiveRequests(ctx context.Context, delta int64, method, route string) {
+	if m == nil || m.ActiveRequests == nil {
+		return
+	}
+	attrs := metric.WithAttributes(
+		attribute.String("http.request.method", method),
+		attribute.String("http.route", route),
+	)
+	m.ActiveRequests.Add(ctx, delta, attrs)
+}

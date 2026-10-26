@@ -5,8 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/XrystikLK/template/internal/domain/trip"
 	"github.com/google/uuid"
+
+	"github.com/XrystikLK/template/internal/domain/trip"
 )
 
 func TestNewTrip(t *testing.T) {
@@ -17,14 +18,14 @@ func TestNewTrip(t *testing.T) {
 	validEnd := trip.Coordinates{Latitude: 59.9343, Longitude: 30.3351}
 
 	tests := []struct {
-		name        string
-		userID      uuid.UUID
-		driverID    uuid.UUID
-		start       trip.Coordinates
-		end         trip.Coordinates
-		price       int64
-		wantErr     bool
-		errField    string
+		name     string
+		userID   uuid.UUID
+		driverID uuid.UUID
+		start    trip.Coordinates
+		end      trip.Coordinates
+		price    int64
+		wantErr  bool
+		errField string
 	}{
 		{
 			name:     "valid trip",
@@ -172,4 +173,3 @@ func TestTripFinish(t *testing.T) {
 		}
 	})
 }
-

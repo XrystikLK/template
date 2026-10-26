@@ -58,4 +58,3 @@ func GetExecutor(ctx context.Context, pool *pgxpool.Pool) Executor {
 	}
 	return pool
 }
-

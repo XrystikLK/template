@@ -4,8 +4,9 @@ import (
 	"context"
 	"time"
 
-	"github.com/XrystikLK/template/internal/model"
 	"github.com/google/uuid"
+
+	"github.com/XrystikLK/template/internal/model"
 )
 
 type UseCase struct {
@@ -46,4 +47,3 @@ func (uc *UseCase) Execute(ctx context.Context, id uuid.UUID) (*model.Trip, erro
 
 	return finishedTrip, nil
 }
-

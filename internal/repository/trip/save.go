@@ -6,12 +6,13 @@ import (
 	"time"
 
 	"github.com/Masterminds/squirrel"
-	domainTrip "github.com/XrystikLK/template/internal/domain/trip"
-	"github.com/XrystikLK/template/internal/infra/postgres/transaction"
-	"github.com/XrystikLK/template/internal/model"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+
+	domainTrip "github.com/XrystikLK/template/internal/domain/trip"
+	"github.com/XrystikLK/template/internal/infra/postgres/transaction"
+	"github.com/XrystikLK/template/internal/model"
 )
 
 func (r *Repository) Save(ctx context.Context, tr model.Trip) error {
@@ -38,7 +39,7 @@ func (r *Repository) Save(ctx context.Context, tr model.Trip) error {
 		return err
 	}
 
-	exec := transaction.GetExecutor(ctx, r.pool)
+	var exec executor = transaction.GetExecutor(ctx, r.pool)
 	_, err = exec.Exec(ctx, query, args...)
 	if err != nil {
 		var pgErr *pgconn.PgError
@@ -69,7 +70,7 @@ func (r *Repository) AddStatusHistory(ctx context.Context, history model.StatusH
 		return err
 	}
 
-	exec := transaction.GetExecutor(ctx, r.pool)
+	var exec executor = transaction.GetExecutor(ctx, r.pool)
 	_, err = exec.Exec(ctx, query, args...)
 	return err
 }
@@ -90,7 +91,7 @@ func (r *Repository) Finish(ctx context.Context, id uuid.UUID, finishedAt time.T
 		return nil, err
 	}
 
-	exec := transaction.GetExecutor(ctx, r.pool)
+	var exec executor = transaction.GetExecutor(ctx, r.pool)
 	row := exec.QueryRow(ctx, query, args...)
 
 	t, err := scanTrip(row)
@@ -119,4 +120,3 @@ func (r *Repository) Finish(ctx context.Context, id uuid.UUID, finishedAt time.T
 
 	return nil, err
 }
-

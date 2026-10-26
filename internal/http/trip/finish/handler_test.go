@@ -7,11 +7,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+	"go.uber.org/mock/gomock"
+
 	domainTrip "github.com/XrystikLK/template/internal/domain/trip"
 	finishHandler "github.com/XrystikLK/template/internal/http/trip/finish"
 	"github.com/XrystikLK/template/internal/model"
-	"github.com/google/uuid"
-	"go.uber.org/mock/gomock"
 )
 
 func TestFinishTripHandler(t *testing.T) {

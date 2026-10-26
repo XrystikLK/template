@@ -5,7 +5,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/XrystikLK/template/internal/config"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp"
@@ -17,6 +16,8 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
 	"go.opentelemetry.io/otel/trace"
+
+	"github.com/XrystikLK/template/internal/config"
 )
 
 type Telemetry struct {
@@ -54,12 +55,14 @@ func Setup(ctx context.Context, cfg *config.Config) (*Telemetry, error) {
 		serviceName = "trip-service"
 	}
 
-	resAttrs := []attribute.KeyValue{
+	extraAttrs := parseResourceAttributes(cfg.OtelResourceAttributes)
+	resAttrs := make([]attribute.KeyValue, 0, 3+len(extraAttrs))
+	resAttrs = append(resAttrs,
 		semconv.ServiceName(serviceName),
 		attribute.String("service.namespace", "tripgo"),
 		attribute.String("deployment.environment", "local"),
-	}
-	resAttrs = append(resAttrs, parseResourceAttributes(cfg.OtelResourceAttributes)...)
+	)
+	resAttrs = append(resAttrs, extraAttrs...)
 
 	res, err := resource.New(ctx,
 		resource.WithAttributes(resAttrs...),
@@ -82,8 +85,10 @@ func Setup(ctx context.Context, cfg *config.Config) (*Telemetry, error) {
 
 	endpoint := cfg.OtelExporterOtlpEndpoint
 	if endpoint != "" {
+		host := strings.TrimPrefix(endpoint, "http://")
+		host = strings.TrimPrefix(host, "https://")
 		opts := []otlptracehttp.Option{
-			otlptracehttp.WithEndpointURL(endpoint),
+			otlptracehttp.WithEndpoint(host),
 			otlptracehttp.WithInsecure(),
 		}
 		traceExporter, err := otlptracehttp.New(ctx, opts...)
@@ -99,7 +104,7 @@ func Setup(ctx context.Context, cfg *config.Config) (*Telemetry, error) {
 		}
 
 		metricOpts := []otlpmetrichttp.Option{
-			otlpmetrichttp.WithEndpointURL(endpoint),
+			otlpmetrichttp.WithEndpoint(host),
 			otlpmetrichttp.WithInsecure(),
 		}
 		metricExporter, err := otlpmetrichttp.New(ctx, metricOpts...)
@@ -151,4 +156,3 @@ func Setup(ctx context.Context, cfg *config.Config) (*Telemetry, error) {
 		shutdown: shutdown,
 	}, nil
 }
-

@@ -9,13 +9,24 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/XrystikLK/template/internal/http/middleware"
-	"github.com/XrystikLK/template/internal/infra/telemetry"
 	"github.com/go-chi/chi/v5"
-	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/sdk/metric"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+
+	"github.com/XrystikLK/template/internal/http/middleware"
 )
+
+type mockMetricsRecorder struct {
+	recordedDuration bool
+	activeRequests   int64
+}
+
+func (m *mockMetricsRecorder) RecordRequestDuration(_ context.Context, _ float64, _, _, _ string) {
+	m.recordedDuration = true
+}
+
+func (m *mockMetricsRecorder) AddActiveRequests(_ context.Context, delta int64, _, _ string) {
+	m.activeRequests += delta
+}
 
 func TestRecover(t *testing.T) {
 	var buf bytes.Buffer
@@ -79,18 +90,12 @@ func TestLogging(t *testing.T) {
 func TestTracingAndMetrics(t *testing.T) {
 	tp := sdktrace.NewTracerProvider()
 	tracer := tp.Tracer("test")
-	otel.SetTracerProvider(tp)
 
-	mp := metric.NewMeterProvider()
-	meter := mp.Meter("test")
-	metrics, err := telemetry.NewMetrics(meter)
-	if err != nil {
-		t.Fatalf("failed to create metrics: %v", err)
-	}
+	recorder := &mockMetricsRecorder{}
 
 	r := chi.NewRouter()
 	r.Use(middleware.Tracing(tracer))
-	r.Use(middleware.Metrics(metrics))
+	r.Use(middleware.Metrics(recorder))
 	r.Get("/items/{id}", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
@@ -103,16 +108,12 @@ func TestTracingAndMetrics(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d", rec.Code)
 	}
+
+	if !recorder.recordedDuration {
+		t.Fatalf("expected duration to be recorded")
+	}
+
+	if recorder.activeRequests != 0 {
+		t.Fatalf("expected activeRequests to be 0 after request, got %d", recorder.activeRequests)
+	}
 }
-
-func TestTelemetryLoggerTraceFields(t *testing.T) {
-	tp := sdktrace.NewTracerProvider()
-	tracer := tp.Tracer("test")
-
-	ctx, span := tracer.Start(context.Background(), "test-span")
-	defer span.End()
-
-	logger := telemetry.NewLogger("info", "test-service")
-	logger.InfoContext(ctx, "test event")
-}
-

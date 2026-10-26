@@ -4,9 +4,10 @@ import (
 	"context"
 	"time"
 
+	"github.com/google/uuid"
+
 	domainTrip "github.com/XrystikLK/template/internal/domain/trip"
 	"github.com/XrystikLK/template/internal/model"
-	"github.com/google/uuid"
 )
 
 type Request struct {
@@ -76,4 +77,3 @@ func (uc *UseCase) Execute(ctx context.Context, req Request) (*model.Trip, error
 
 	return &tripModel, nil
 }
-

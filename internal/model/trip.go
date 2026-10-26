@@ -39,4 +39,3 @@ type StatusHistory struct {
 	Reason     *string
 	ChangedAt  time.Time
 }
-

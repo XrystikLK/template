@@ -3,8 +3,9 @@ package get
 import (
 	"context"
 
-	"github.com/XrystikLK/template/internal/model"
 	"github.com/google/uuid"
+
+	"github.com/XrystikLK/template/internal/model"
 )
 
 type UseCase struct {
@@ -18,4 +19,3 @@ func New(repo tripRepository) *UseCase {
 func (uc *UseCase) Execute(ctx context.Context, id uuid.UUID) (*model.Trip, error) {
 	return uc.repo.GetByID(ctx, id)
 }
-

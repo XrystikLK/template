@@ -5,11 +5,12 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/google/uuid"
+	"go.uber.org/mock/gomock"
+
 	domainTrip "github.com/XrystikLK/template/internal/domain/trip"
 	"github.com/XrystikLK/template/internal/model"
 	"github.com/XrystikLK/template/internal/usecase/trip/get"
-	"github.com/google/uuid"
-	"go.uber.org/mock/gomock"
 )
 
 func TestGetTripUseCase(t *testing.T) {
@@ -32,7 +33,6 @@ func TestGetTripUseCase(t *testing.T) {
 
 		uc := get.New(repo)
 		res, err := uc.Execute(context.Background(), tripID)
-
 		if err != nil {
 			t.Fatalf("expected nil error, got: %v", err)
 		}
@@ -78,4 +78,3 @@ func TestGetTripUseCase(t *testing.T) {
 		}
 	})
 }
-

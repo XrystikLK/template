@@ -8,7 +8,12 @@ import (
 	createUC "github.com/XrystikLK/template/internal/usecase/trip/create"
 )
 
-type useCase interface {
-	Execute(ctx context.Context, req createUC.Request) (*model.Trip, error)
-}
+type (
+	useCase interface {
+		Execute(ctx context.Context, req createUC.Request) (*model.Trip, error)
+	}
 
+	metrics interface {
+		IncTripsCreated(ctx context.Context)
+	}
+)

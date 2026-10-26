@@ -65,4 +65,3 @@ func NewLogger(levelStr, serviceName string) *slog.Logger {
 	}
 	return logger
 }
-

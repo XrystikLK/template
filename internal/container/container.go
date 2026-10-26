@@ -6,6 +6,9 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/XrystikLK/template/internal/config"
 	api "github.com/XrystikLK/template/internal/generated"
 	httpTransport "github.com/XrystikLK/template/internal/http"
@@ -20,8 +23,6 @@ import (
 	createUC "github.com/XrystikLK/template/internal/usecase/trip/create"
 	finishUC "github.com/XrystikLK/template/internal/usecase/trip/finish"
 	getUC "github.com/XrystikLK/template/internal/usecase/trip/get"
-	"github.com/go-chi/chi/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type Container struct {

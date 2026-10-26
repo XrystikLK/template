@@ -9,13 +9,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/joho/godotenv"
+
 	domainTrip "github.com/XrystikLK/template/internal/domain/trip"
 	"github.com/XrystikLK/template/internal/infra/postgres/transaction"
 	"github.com/XrystikLK/template/internal/model"
 	repoTrip "github.com/XrystikLK/template/internal/repository/trip"
-	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/joho/godotenv"
 )
 
 func setupTestDB(t *testing.T) (*pgxpool.Pool, *repoTrip.Repository, *transaction.Manager) {
@@ -24,6 +25,7 @@ func setupTestDB(t *testing.T) (*pgxpool.Pool, *repoTrip.Repository, *transactio
 
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
+		//nolint:gosec // default test database connection string for local integration tests
 		dbURL = "postgres://tripgo:tripgo@localhost:22032/tripgo?sslmode=disable"
 	}
 
@@ -250,4 +252,3 @@ func TestIntegrationTransactionRollback(t *testing.T) {
 		t.Fatalf("expected 0 status history rows after rollback, got %d", count)
 	}
 }
-

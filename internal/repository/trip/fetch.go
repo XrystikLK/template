@@ -5,11 +5,12 @@ import (
 	"errors"
 
 	"github.com/Masterminds/squirrel"
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+
 	domainTrip "github.com/XrystikLK/template/internal/domain/trip"
 	"github.com/XrystikLK/template/internal/infra/postgres/transaction"
 	"github.com/XrystikLK/template/internal/model"
-	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 )
 
 func (r *Repository) GetByID(ctx context.Context, id uuid.UUID) (*model.Trip, error) {
@@ -30,7 +31,7 @@ func (r *Repository) GetByID(ctx context.Context, id uuid.UUID) (*model.Trip, er
 		return nil, err
 	}
 
-	exec := transaction.GetExecutor(ctx, r.pool)
+	var exec executor = transaction.GetExecutor(ctx, r.pool)
 	row := exec.QueryRow(ctx, query, args...)
 
 	t, err := scanTrip(row)
@@ -43,4 +44,3 @@ func (r *Repository) GetByID(ctx context.Context, id uuid.UUID) (*model.Trip, er
 
 	return t, nil
 }
-
