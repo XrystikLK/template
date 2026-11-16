@@ -17,6 +17,8 @@ import (
 	createHandler "github.com/XrystikLK/template/internal/http/trip/create"
 	finishHandler "github.com/XrystikLK/template/internal/http/trip/finish"
 	getHandler "github.com/XrystikLK/template/internal/http/trip/get"
+	createPositionHandler "github.com/XrystikLK/template/internal/http/trip/position/create"
+	listPositionsHandler "github.com/XrystikLK/template/internal/http/trip/position/list"
 	"github.com/XrystikLK/template/internal/infra/postgres"
 	"github.com/XrystikLK/template/internal/infra/postgres/transaction"
 	"github.com/XrystikLK/template/internal/infra/telemetry"
@@ -24,6 +26,8 @@ import (
 	createUC "github.com/XrystikLK/template/internal/usecase/trip/create"
 	finishUC "github.com/XrystikLK/template/internal/usecase/trip/finish"
 	getUC "github.com/XrystikLK/template/internal/usecase/trip/get"
+	createPositionUC "github.com/XrystikLK/template/internal/usecase/trip/position/create"
+	listPositionsUC "github.com/XrystikLK/template/internal/usecase/trip/position/list"
 )
 
 type Container struct {
@@ -53,12 +57,16 @@ func New(ctx context.Context, cfg *config.Config) (*Container, error) {
 	createUseCase := createUC.New(tripRepo, txManager, logger, tel.Metrics)
 	getUseCase := getUC.New(tripRepo)
 	finishUseCase := finishUC.New(tripRepo, txManager, logger, tel.Metrics)
+	createPositionUseCase := createPositionUC.New(tripRepo, txManager, tel.Metrics, nil)
+	listPositionsUseCase := listPositionsUC.New(tripRepo)
 
 	createH := createHandler.New(createUseCase)
 	getH := getHandler.New(getUseCase)
 	finishH := finishHandler.New(finishUseCase)
+	createPosH := createPositionHandler.New(createPositionUseCase)
+	listPosH := listPositionsHandler.New(listPositionsUseCase)
 
-	srv := httpTransport.NewServer(createH, getH, finishH, pool, cfg.DatabaseConnectTimeout)
+	srv := httpTransport.NewServer(createH, getH, finishH, createPosH, listPosH, pool, cfg.DatabaseConnectTimeout)
 
 	r := chi.NewRouter()
 	r.Use(middleware.Recover(logger))

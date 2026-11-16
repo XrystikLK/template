@@ -12,6 +12,7 @@ type Metrics struct {
 	ActiveRequests  metric.Int64UpDownCounter
 	TripsCreated    metric.Int64Counter
 	TripsCompleted  metric.Int64Counter
+	PositionsSaved  metric.Int64Counter
 }
 
 func NewMetrics(meter metric.Meter) (*Metrics, error) {
@@ -51,11 +52,21 @@ func NewMetrics(meter metric.Meter) (*Metrics, error) {
 		return nil, err
 	}
 
+	saved, err := meter.Int64Counter(
+		"tripgo.positions.saved",
+		metric.WithDescription("Total number of saved positions"),
+		metric.WithUnit("{position}"),
+	)
+	if err != nil {
+		return nil, err
+	}
+
 	return &Metrics{
 		RequestDuration: duration,
 		ActiveRequests:  active,
 		TripsCreated:    created,
 		TripsCompleted:  completed,
+		PositionsSaved:  saved,
 	}, nil
 }
 
@@ -68,6 +79,12 @@ func (m *Metrics) IncTripsCreated(ctx context.Context) {
 func (m *Metrics) IncTripsCompleted(ctx context.Context) {
 	if m != nil && m.TripsCompleted != nil {
 		m.TripsCompleted.Add(ctx, 1)
+	}
+}
+
+func (m *Metrics) IncPositionsSaved(ctx context.Context) {
+	if m != nil && m.PositionsSaved != nil {
+		m.PositionsSaved.Add(ctx, 1)
 	}
 }
 
