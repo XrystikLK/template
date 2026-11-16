@@ -22,7 +22,7 @@ func (r *Repository) GetByID(ctx context.Context, id uuid.UUID) (*model.Trip, er
 		"start_latitude", "start_longitude",
 		"end_latitude", "end_longitude",
 		"price", "status", "started_at", "finished_at",
-		"created_at", "updated_at",
+		"created_at", "updated_at", "last_position_at",
 	).
 		From("trips").
 		Where(squirrel.Eq{"id": id}).
