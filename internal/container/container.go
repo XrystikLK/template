@@ -98,11 +98,32 @@ func (c *Container) Start() error {
 }
 
 func (c *Container) Shutdown(ctx context.Context) error {
-	defer c.pool.Close()
-	defer func() {
+	serverErr := c.server.Shutdown(ctx)
+	if serverErr != nil {
+		_ = c.server.Close()
+	}
+
+	if c.telemetry != nil {
 		_ = c.telemetry.Shutdown(ctx)
-	}()
-	return c.server.Shutdown(ctx)
+	}
+
+	if c.pool != nil {
+		poolClosed := make(chan struct{})
+		go func() {
+			c.pool.Close()
+			close(poolClosed)
+		}()
+
+		select {
+		case <-poolClosed:
+		case <-ctx.Done():
+		}
+	}
+
+	if serverErr != nil {
+		return serverErr
+	}
+	return ctx.Err()
 }
 
 func (c *Container) Addr() string {

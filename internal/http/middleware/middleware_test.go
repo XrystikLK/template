@@ -2,7 +2,6 @@ package middleware_test
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -15,28 +14,10 @@ import (
 	"go.opentelemetry.io/otel/codes"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+	"go.uber.org/mock/gomock"
 
 	"github.com/XrystikLK/template/internal/http/middleware"
 )
-
-type mockMetricsRecorder struct {
-	recordedDuration bool
-	recordedStatus   string
-	recordedRoute    string
-	activeRequests   int64
-	activeRoute      string
-}
-
-func (m *mockMetricsRecorder) RecordRequestDuration(_ context.Context, _ float64, _, route, statusCode string) {
-	m.recordedDuration = true
-	m.recordedRoute = route
-	m.recordedStatus = statusCode
-}
-
-func (m *mockMetricsRecorder) AddActiveRequests(_ context.Context, delta int64, _, route string) {
-	m.activeRequests += delta
-	m.activeRoute = route
-}
 
 func TestRecover(t *testing.T) {
 	var buf bytes.Buffer
@@ -98,19 +79,31 @@ func TestLogging(t *testing.T) {
 }
 
 func TestTracingAndMetrics(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	metricsMock := NewMockServerMetrics(ctrl)
+	metricsMock.EXPECT().
+		AddActiveRequests(gomock.Any(), int64(1), "GET", "/api/v1/trips/{tripId}").
+		Times(1)
+	metricsMock.EXPECT().
+		AddActiveRequests(gomock.Any(), int64(-1), "GET", "/api/v1/trips/{tripId}").
+		Times(1)
+	metricsMock.EXPECT().
+		RecordRequestDuration(gomock.Any(), gomock.Any(), "GET", "/api/v1/trips/{tripId}", "200").
+		Times(1)
+
 	tp := sdktrace.NewTracerProvider()
 	tracer := tp.Tracer("test")
 
-	recorder := &mockMetricsRecorder{}
-
 	r := chi.NewRouter()
 	r.Use(middleware.Tracing(tracer))
-	r.Use(middleware.Metrics(recorder))
-	r.Get("/items/{id}", func(w http.ResponseWriter, r *http.Request) {
+	r.Use(middleware.Metrics(metricsMock))
+	r.Get("/api/v1/trips/{tripId}", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	req := httptest.NewRequest(http.MethodGet, "/items/100", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/trips/11111111-2222-3333-4444-555555555555", nil)
 	rec := httptest.NewRecorder()
 
 	r.ServeHTTP(rec, req)
@@ -118,17 +111,23 @@ func TestTracingAndMetrics(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d", rec.Code)
 	}
-
-	if !recorder.recordedDuration {
-		t.Fatalf("expected duration to be recorded")
-	}
-
-	if recorder.activeRequests != 0 {
-		t.Fatalf("expected activeRequests to be 0 after request, got %d", recorder.activeRequests)
-	}
 }
 
 func TestMiddlewareChain_Panic_RecordsTelemetryAndRecovers(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	metricsMock := NewMockServerMetrics(ctrl)
+	metricsMock.EXPECT().
+		AddActiveRequests(gomock.Any(), int64(1), "GET", "/api/v1/trips/{tripId}").
+		Times(1)
+	metricsMock.EXPECT().
+		AddActiveRequests(gomock.Any(), int64(-1), "GET", "/api/v1/trips/{tripId}").
+		Times(1)
+	metricsMock.EXPECT().
+		RecordRequestDuration(gomock.Any(), gomock.Any(), "GET", "/api/v1/trips/{tripId}", "500").
+		Times(1)
+
 	exporter := tracetest.NewInMemoryExporter()
 	tp := sdktrace.NewTracerProvider(sdktrace.WithSyncer(exporter))
 	tracer := tp.Tracer("test")
@@ -136,13 +135,11 @@ func TestMiddlewareChain_Panic_RecordsTelemetryAndRecovers(t *testing.T) {
 	var logBuf bytes.Buffer
 	logger := slog.New(slog.NewJSONHandler(&logBuf, nil))
 
-	recorder := &mockMetricsRecorder{}
-
 	r := chi.NewRouter()
 	r.Use(middleware.Recover(logger))
 	r.Use(middleware.Tracing(tracer))
 	r.Use(middleware.Logging(logger))
-	r.Use(middleware.Metrics(recorder))
+	r.Use(middleware.Metrics(metricsMock))
 
 	r.Get("/api/v1/trips/{tripId}", func(w http.ResponseWriter, r *http.Request) {
 		panic("database connection failure")
@@ -155,12 +152,6 @@ func TestMiddlewareChain_Panic_RecordsTelemetryAndRecovers(t *testing.T) {
 
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 	assert.Equal(t, "application/problem+json", rec.Header().Get("Content-Type"))
-
-	assert.True(t, recorder.recordedDuration)
-	assert.Equal(t, "500", recorder.recordedStatus)
-	assert.Equal(t, "/api/v1/trips/{tripId}", recorder.recordedRoute)
-	assert.Equal(t, int64(0), recorder.activeRequests)
-	assert.Equal(t, "/api/v1/trips/{tripId}", recorder.activeRoute)
 
 	spans := exporter.GetSpans()
 	require.NotEmpty(t, spans)
