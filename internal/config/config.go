@@ -27,6 +27,12 @@ type Config struct {
 	DatabaseMaxConnLifetime time.Duration
 	DatabaseConnectTimeout  time.Duration
 	DatabaseQueryTimeout    time.Duration
+
+	OtelServiceName          string
+	OtelExporterOtlpEndpoint string
+	OtelExporterOtlpProtocol string
+	OtelResourceAttributes   string
+	OtelTracesSampler        string
 }
 
 func Load() (*Config, error) {
@@ -105,21 +111,49 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 
+	otelService := os.Getenv("OTEL_SERVICE_NAME")
+	if otelService == "" {
+		otelService = "trip-service"
+	}
+
+	protocol := os.Getenv("OTEL_EXPORTER_OTLP_PROTOCOL")
+	if protocol == "" {
+		protocol = "http/protobuf"
+	}
+	if protocol != "http/protobuf" {
+		return nil, fmt.Errorf("неподдерживаемый OTEL_EXPORTER_OTLP_PROTOCOL: %q (поддерживается http/protobuf)", protocol)
+	}
+
+	sampler := os.Getenv("OTEL_TRACES_SAMPLER")
+	if sampler == "" {
+		sampler = "parentbased_always_on"
+	}
+	switch strings.ToLower(sampler) {
+	case "always_on", "always_off", "parentbased_always_on", "parentbased_always_off":
+	default:
+		return nil, fmt.Errorf("неподдерживаемый OTEL_TRACES_SAMPLER: %q", sampler)
+	}
+
 	return &Config{
-		HTTPAddr:                httpAddr,
-		HTTPReadTimeout:         readTimeout,
-		HTTPReadHeaderTimeout:   readHeaderTimeout,
-		HTTPWriteTimeout:        writeTimeout,
-		HTTPIdleTimeout:         idleTimeout,
-		ShutdownTimeout:         shutdownTimeout,
-		LogLevel:                logLevelStr,
-		ParsedLogLevel:          parsedLevel,
-		DatabaseURL:             dbURL,
-		DatabaseMaxConns:        int32(maxConns),
-		DatabaseMinConns:        int32(minConns),
-		DatabaseMaxConnLifetime: maxConnLifetime,
-		DatabaseConnectTimeout:  connectTimeout,
-		DatabaseQueryTimeout:    queryTimeout,
+		HTTPAddr:                 httpAddr,
+		HTTPReadTimeout:          readTimeout,
+		HTTPReadHeaderTimeout:    readHeaderTimeout,
+		HTTPWriteTimeout:         writeTimeout,
+		HTTPIdleTimeout:          idleTimeout,
+		ShutdownTimeout:          shutdownTimeout,
+		LogLevel:                 logLevelStr,
+		ParsedLogLevel:           parsedLevel,
+		DatabaseURL:              dbURL,
+		DatabaseMaxConns:         maxConns,
+		DatabaseMinConns:         minConns,
+		DatabaseMaxConnLifetime:  maxConnLifetime,
+		DatabaseConnectTimeout:   connectTimeout,
+		DatabaseQueryTimeout:     queryTimeout,
+		OtelServiceName:          otelService,
+		OtelExporterOtlpEndpoint: os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"),
+		OtelExporterOtlpProtocol: protocol,
+		OtelResourceAttributes:   os.Getenv("OTEL_RESOURCE_ATTRIBUTES"),
+		OtelTracesSampler:        sampler,
 	}, nil
 }
 
@@ -138,28 +172,28 @@ func parseDurationEnv(key, defaultVal string) (time.Duration, error) {
 	return d, nil
 }
 
-func parsePositiveIntEnv(key string, defaultVal int) (int, error) {
+func parsePositiveIntEnv(key string, defaultVal int32) (int32, error) {
 	valStr := os.Getenv(key)
 	if valStr == "" {
 		return defaultVal, nil
 	}
-	val, err := strconv.Atoi(valStr)
+	val, err := strconv.ParseInt(valStr, 10, 32)
 	if err != nil || val <= 0 {
 		return 0, fmt.Errorf("некорректное значение переменной %s: должно быть положительным целым числом, получено: %q", key, valStr)
 	}
-	return val, nil
+	return int32(val), nil
 }
 
-func parseNonNegativeIntEnv(key string, defaultVal int) (int, error) {
+func parseNonNegativeIntEnv(key string, defaultVal int32) (int32, error) {
 	valStr := os.Getenv(key)
 	if valStr == "" {
 		return defaultVal, nil
 	}
-	val, err := strconv.Atoi(valStr)
+	val, err := strconv.ParseInt(valStr, 10, 32)
 	if err != nil || val < 0 {
 		return 0, fmt.Errorf("некорректное значение переменной %s: должно быть неотрицательным целым числом, получено: %q", key, valStr)
 	}
-	return val, nil
+	return int32(val), nil
 }
 
 func parseLogLevel(level string) (slog.Level, error) {

@@ -1,4 +1,4 @@
-package db
+package transaction
 
 import (
 	"context"
@@ -10,19 +10,21 @@ import (
 
 type txKey struct{}
 
-type TxManager interface {
-	Do(ctx context.Context, fn func(ctx context.Context) error) error
+type Executor interface {
+	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
 }
 
-type txManager struct {
+type Manager struct {
 	pool *pgxpool.Pool
 }
 
-func NewTxManager(pool *pgxpool.Pool) TxManager {
-	return &txManager{pool: pool}
+func NewManager(pool *pgxpool.Pool) *Manager {
+	return &Manager{pool: pool}
 }
 
-func (m *txManager) Do(ctx context.Context, fn func(ctx context.Context) error) (err error) {
+func (m *Manager) Do(ctx context.Context, fn func(ctx context.Context) error) (err error) {
 	if tx, ok := ctx.Value(txKey{}).(pgx.Tx); ok && tx != nil {
 		return fn(ctx)
 	}
@@ -48,12 +50,6 @@ func (m *txManager) Do(ctx context.Context, fn func(ctx context.Context) error) 
 	ctxWithTx := context.WithValue(ctx, txKey{}, tx)
 	err = fn(ctxWithTx)
 	return err
-}
-
-type Executor interface {
-	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
-	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
-	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
 }
 
 func GetExecutor(ctx context.Context, pool *pgxpool.Pool) Executor {

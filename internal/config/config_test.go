@@ -5,9 +5,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/XrystikLK/template/internal/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/XrystikLK/template/internal/config"
 )
 
 func TestConfig_Load_MissingDatabaseURL(t *testing.T) {
@@ -111,4 +112,18 @@ func TestConfig_Load_InvalidLogLevel(t *testing.T) {
 	_, err := config.Load()
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "LOG_LEVEL")
+}
+
+func TestConfig_Load_OtelOptions(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://localhost/db")
+	t.Setenv("OTEL_EXPORTER_OTLP_PROTOCOL", "grpc-unsupported")
+	_, err := config.Load()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "OTEL_EXPORTER_OTLP_PROTOCOL")
+
+	t.Setenv("OTEL_EXPORTER_OTLP_PROTOCOL", "http/protobuf")
+	t.Setenv("OTEL_TRACES_SAMPLER", "unsupported_sampler")
+	_, err = config.Load()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "OTEL_TRACES_SAMPLER")
 }
