@@ -10,6 +10,8 @@ import (
 	createHandler "github.com/XrystikLK/template/internal/http/trip/create"
 	finishHandler "github.com/XrystikLK/template/internal/http/trip/finish"
 	getHandler "github.com/XrystikLK/template/internal/http/trip/get"
+	createPositionHandler "github.com/XrystikLK/template/internal/http/trip/position/create"
+	listPositionsHandler "github.com/XrystikLK/template/internal/http/trip/position/list"
 )
 
 type pinger interface {
@@ -18,17 +20,21 @@ type pinger interface {
 
 type Server struct {
 	api.Unimplemented
-	createHandler *createHandler.Handler
-	getHandler    *getHandler.Handler
-	finishHandler *finishHandler.Handler
-	pinger        pinger
-	pingTimeout   time.Duration
+	createHandler         *createHandler.Handler
+	getHandler            *getHandler.Handler
+	finishHandler         *finishHandler.Handler
+	createPositionHandler *createPositionHandler.Handler
+	listPositionsHandler  *listPositionsHandler.Handler
+	pinger                pinger
+	pingTimeout           time.Duration
 }
 
 func NewServer(
 	createH *createHandler.Handler,
 	getH *getHandler.Handler,
 	finishH *finishHandler.Handler,
+	createPosH *createPositionHandler.Handler,
+	listPosH *listPositionsHandler.Handler,
 	pinger pinger,
 	pingTimeout time.Duration,
 ) *Server {
@@ -36,11 +42,13 @@ func NewServer(
 		pingTimeout = 2 * time.Second
 	}
 	return &Server{
-		createHandler: createH,
-		getHandler:    getH,
-		finishHandler: finishH,
-		pinger:        pinger,
-		pingTimeout:   pingTimeout,
+		createHandler:         createH,
+		getHandler:            getH,
+		finishHandler:         finishH,
+		createPositionHandler: createPosH,
+		listPositionsHandler:  listPosH,
+		pinger:                pinger,
+		pingTimeout:           pingTimeout,
 	}
 }
 
@@ -54,6 +62,14 @@ func (s *Server) GetTrip(w http.ResponseWriter, r *http.Request, tripId api.Trip
 
 func (s *Server) FinishTrip(w http.ResponseWriter, r *http.Request, tripId api.TripId) {
 	s.finishHandler.Handle(w, r, tripId)
+}
+
+func (s *Server) CreateTripPosition(w http.ResponseWriter, r *http.Request, tripId api.TripId) {
+	s.createPositionHandler.Handle(w, r, tripId)
+}
+
+func (s *Server) ListTripPositions(w http.ResponseWriter, r *http.Request, tripId api.TripId) {
+	s.listPositionsHandler.Handle(w, r, tripId)
 }
 
 func (s *Server) Health(w http.ResponseWriter, _ *http.Request) {

@@ -10,6 +10,7 @@ import (
 
 	"github.com/XrystikLK/template/internal/config"
 	domainTrip "github.com/XrystikLK/template/internal/domain/trip"
+	"github.com/XrystikLK/template/internal/gateway/push"
 	api "github.com/XrystikLK/template/internal/generated"
 	httpTransport "github.com/XrystikLK/template/internal/http"
 	"github.com/XrystikLK/template/internal/http/domainerror"
@@ -17,6 +18,8 @@ import (
 	createHandler "github.com/XrystikLK/template/internal/http/trip/create"
 	finishHandler "github.com/XrystikLK/template/internal/http/trip/finish"
 	getHandler "github.com/XrystikLK/template/internal/http/trip/get"
+	createPositionHandler "github.com/XrystikLK/template/internal/http/trip/position/create"
+	listPositionsHandler "github.com/XrystikLK/template/internal/http/trip/position/list"
 	"github.com/XrystikLK/template/internal/infra/postgres"
 	"github.com/XrystikLK/template/internal/infra/postgres/transaction"
 	"github.com/XrystikLK/template/internal/infra/telemetry"
@@ -24,13 +27,19 @@ import (
 	createUC "github.com/XrystikLK/template/internal/usecase/trip/create"
 	finishUC "github.com/XrystikLK/template/internal/usecase/trip/finish"
 	getUC "github.com/XrystikLK/template/internal/usecase/trip/get"
+	createPositionUC "github.com/XrystikLK/template/internal/usecase/trip/position/create"
+	listPositionsUC "github.com/XrystikLK/template/internal/usecase/trip/position/list"
+	workerPositions "github.com/XrystikLK/template/internal/worker/positions"
 )
 
 type Container struct {
-	server    *http.Server
-	pool      *pgxpool.Pool
-	telemetry *telemetry.Telemetry
-	logger    *slog.Logger
+	server          *http.Server
+	pool            *pgxpool.Pool
+	telemetry       *telemetry.Telemetry
+	logger          *slog.Logger
+	positionsWorker *workerPositions.Service
+	workerCtx       context.Context
+	workerCancel    context.CancelFunc
 }
 
 func New(ctx context.Context, cfg *config.Config) (*Container, error) {
@@ -47,18 +56,43 @@ func New(ctx context.Context, cfg *config.Config) (*Container, error) {
 		return nil, err
 	}
 
+	pushGateway, err := push.New(cfg.PushHTTPURL, cfg.PushRequestTimeout, tel.Tracer)
+	if err != nil {
+		pool.Close()
+		_ = tel.Shutdown(ctx)
+		return nil, err
+	}
+
 	txManager := transaction.NewManager(pool)
 	tripRepo := repoTrip.New(pool, cfg.DatabaseQueryTimeout)
+
+	positionsWorker := workerPositions.NewService(
+		tripRepo,
+		pushGateway,
+		nil,
+		cfg.PositionQueueSize,
+		cfg.PositionWorkers,
+		cfg.PositionCheckInterval,
+		cfg.PositionStaleAfter,
+		cfg.PushRequestTimeout,
+		tel.Tracer,
+		logger,
+		tel.Metrics,
+	)
 
 	createUseCase := createUC.New(tripRepo, txManager, logger, tel.Metrics)
 	getUseCase := getUC.New(tripRepo)
 	finishUseCase := finishUC.New(tripRepo, txManager, logger, tel.Metrics)
+	createPositionUseCase := createPositionUC.New(tripRepo, txManager, tel.Metrics, positionsWorker)
+	listPositionsUseCase := listPositionsUC.New(tripRepo)
 
 	createH := createHandler.New(createUseCase)
 	getH := getHandler.New(getUseCase)
 	finishH := finishHandler.New(finishUseCase)
+	createPosH := createPositionHandler.New(createPositionUseCase)
+	listPosH := listPositionsHandler.New(listPositionsUseCase)
 
-	srv := httpTransport.NewServer(createH, getH, finishH, pool, cfg.DatabaseConnectTimeout)
+	srv := httpTransport.NewServer(createH, getH, finishH, createPosH, listPosH, pool, cfg.DatabaseConnectTimeout)
 
 	r := chi.NewRouter()
 	r.Use(middleware.Recover(logger))
@@ -85,15 +119,23 @@ func New(ctx context.Context, cfg *config.Config) (*Container, error) {
 		IdleTimeout:       cfg.HTTPIdleTimeout,
 	}
 
+	workerCtx, workerCancel := context.WithCancel(context.Background())
+
 	return &Container{
-		server:    httpServer,
-		pool:      pool,
-		telemetry: tel,
-		logger:    logger,
+		server:          httpServer,
+		pool:            pool,
+		telemetry:       tel,
+		logger:          logger,
+		positionsWorker: positionsWorker,
+		workerCtx:       workerCtx,
+		workerCancel:    workerCancel,
 	}, nil
 }
 
 func (c *Container) Start() error {
+	if c.positionsWorker != nil {
+		c.positionsWorker.Start(c.workerCtx)
+	}
 	return c.server.ListenAndServe()
 }
 
@@ -101,6 +143,15 @@ func (c *Container) Shutdown(ctx context.Context) error {
 	serverErr := c.server.Shutdown(ctx)
 	if serverErr != nil {
 		_ = c.server.Close()
+	}
+
+	if c.positionsWorker != nil {
+		c.positionsWorker.StopScanner()
+		c.positionsWorker.StopWorkers(ctx)
+	}
+
+	if c.workerCancel != nil {
+		c.workerCancel()
 	}
 
 	if c.telemetry != nil {

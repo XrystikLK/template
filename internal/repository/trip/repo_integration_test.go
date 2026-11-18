@@ -55,6 +55,7 @@ func cleanupTrip(t *testing.T, pool *pgxpool.Pool, tripID uuid.UUID) {
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
+		_, _ = pool.Exec(ctx, "DELETE FROM trip_positions WHERE trip_id = $1", tripID)
 		_, _ = pool.Exec(ctx, "DELETE FROM trip_status_history WHERE trip_id = $1", tripID)
 		_, _ = pool.Exec(ctx, "DELETE FROM trips WHERE id = $1", tripID)
 	})
@@ -250,5 +251,326 @@ func TestIntegrationTransactionRollback(t *testing.T) {
 	}
 	if count != 0 {
 		t.Fatalf("expected 0 status history rows after rollback, got %d", count)
+	}
+}
+
+func TestIntegrationSaveAndListPositions(t *testing.T) {
+	pool, repo, _ := setupTestDB(t)
+
+	tripID := uuid.New()
+	cleanupTrip(t, pool, tripID)
+
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	tr := model.Trip{
+		ID:         tripID,
+		UserID:     uuid.New(),
+		DriverID:   uuid.New(),
+		StartPoint: model.Coordinates{Latitude: 55.75, Longitude: 37.61},
+		EndPoint:   model.Coordinates{Latitude: 55.80, Longitude: 37.70},
+		Price:      500,
+		Status:     model.StatusActive,
+		StartedAt:  now,
+		CreatedAt:  now,
+		UpdatedAt:  now,
+	}
+
+	ctx := context.Background()
+	if err := repo.Save(ctx, tr); err != nil {
+		t.Fatalf("failed to save trip: %v", err)
+	}
+
+	pos1 := model.Position{
+		Coordinates: model.Coordinates{Latitude: 55.76, Longitude: 37.62},
+		RecordedAt:  now.Add(10 * time.Second),
+	}
+	saved1, err := repo.SavePosition(ctx, tripID, pos1)
+	if err != nil {
+		t.Fatalf("failed to save pos1: %v", err)
+	}
+	if saved1.ID == 0 {
+		t.Fatalf("expected generated ID for pos1, got 0")
+	}
+
+	pos2 := model.Position{
+		Coordinates: model.Coordinates{Latitude: 55.77, Longitude: 37.63},
+		RecordedAt:  now.Add(20 * time.Second),
+	}
+	saved2, err := repo.SavePosition(ctx, tripID, pos2)
+	if err != nil {
+		t.Fatalf("failed to save pos2: %v", err)
+	}
+
+	list, err := repo.ListPositions(ctx, tripID)
+	if err != nil {
+		t.Fatalf("failed to list positions: %v", err)
+	}
+	if len(list) != 2 {
+		t.Fatalf("expected 2 positions, got %d", len(list))
+	}
+	if list[0].ID != saved1.ID || list[1].ID != saved2.ID {
+		t.Fatalf("positions not sorted correctly: %+v", list)
+	}
+
+	fetchedTrip, err := repo.GetByID(ctx, tripID)
+	if err != nil {
+		t.Fatalf("failed to get trip: %v", err)
+	}
+	if fetchedTrip.LastPositionAt == nil || !fetchedTrip.LastPositionAt.Equal(pos2.RecordedAt) {
+		t.Fatalf("expected last_position_at to be %v, got %v", pos2.RecordedAt, fetchedTrip.LastPositionAt)
+	}
+}
+
+func TestIntegrationSavePositionOlderDoesNotRevertLastPositionAt(t *testing.T) {
+	pool, repo, _ := setupTestDB(t)
+
+	tripID := uuid.New()
+	cleanupTrip(t, pool, tripID)
+
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	tr := model.Trip{
+		ID:         tripID,
+		UserID:     uuid.New(),
+		DriverID:   uuid.New(),
+		StartPoint: model.Coordinates{Latitude: 55.75, Longitude: 37.61},
+		EndPoint:   model.Coordinates{Latitude: 55.80, Longitude: 37.70},
+		Price:      500,
+		Status:     model.StatusActive,
+		StartedAt:  now,
+		CreatedAt:  now,
+		UpdatedAt:  now,
+	}
+
+	ctx := context.Background()
+	if err := repo.Save(ctx, tr); err != nil {
+		t.Fatalf("failed to save trip: %v", err)
+	}
+
+	newerPos := model.Position{
+		Coordinates: model.Coordinates{Latitude: 55.76, Longitude: 37.62},
+		RecordedAt:  now.Add(20 * time.Second),
+	}
+	if _, err := repo.SavePosition(ctx, tripID, newerPos); err != nil {
+		t.Fatalf("failed to save newer pos: %v", err)
+	}
+
+	olderPos := model.Position{
+		Coordinates: model.Coordinates{Latitude: 55.755, Longitude: 37.615},
+		RecordedAt:  now.Add(10 * time.Second),
+	}
+	if _, err := repo.SavePosition(ctx, tripID, olderPos); err != nil {
+		t.Fatalf("failed to save older pos: %v", err)
+	}
+
+	fetchedTrip, err := repo.GetByID(ctx, tripID)
+	if err != nil {
+		t.Fatalf("failed to get trip: %v", err)
+	}
+	if fetchedTrip.LastPositionAt == nil || !fetchedTrip.LastPositionAt.Equal(newerPos.RecordedAt) {
+		t.Fatalf("last_position_at was reverted! got %v, want %v", fetchedTrip.LastPositionAt, newerPos.RecordedAt)
+	}
+}
+
+func TestIntegrationSavePositionTripStatusValidation(t *testing.T) {
+	pool, repo, _ := setupTestDB(t)
+
+	nonExistentID := uuid.New()
+	ctx := context.Background()
+
+	pos := model.Position{
+		Coordinates: model.Coordinates{Latitude: 55.75, Longitude: 37.61},
+		RecordedAt:  time.Now().UTC(),
+	}
+
+	_, err := repo.SavePosition(ctx, nonExistentID, pos)
+	if !errors.Is(err, domainTrip.ErrTripNotFound) {
+		t.Fatalf("expected ErrTripNotFound for non-existent trip, got: %v", err)
+	}
+
+	_, err = repo.ListPositions(ctx, nonExistentID)
+	if !errors.Is(err, domainTrip.ErrTripNotFound) {
+		t.Fatalf("expected ErrTripNotFound for non-existent trip in list, got: %v", err)
+	}
+
+	tripID := uuid.New()
+	cleanupTrip(t, pool, tripID)
+
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	tr := model.Trip{
+		ID:         tripID,
+		UserID:     uuid.New(),
+		DriverID:   uuid.New(),
+		StartPoint: model.Coordinates{Latitude: 55.75, Longitude: 37.61},
+		EndPoint:   model.Coordinates{Latitude: 55.80, Longitude: 37.70},
+		Price:      500,
+		Status:     model.StatusActive,
+		StartedAt:  now,
+		CreatedAt:  now,
+		UpdatedAt:  now,
+	}
+	if err := repo.Save(ctx, tr); err != nil {
+		t.Fatalf("failed to save trip: %v", err)
+	}
+
+	finishTime := now.Add(5 * time.Minute)
+	if _, err := repo.Finish(ctx, tripID, finishTime); err != nil {
+		t.Fatalf("failed to finish trip: %v", err)
+	}
+
+	_, err = repo.SavePosition(ctx, tripID, pos)
+	if !errors.Is(err, domainTrip.ErrTripCompleted) {
+		t.Fatalf("expected ErrTripCompleted for completed trip, got: %v", err)
+	}
+}
+
+func TestIntegrationSavePositionTransactionRollback(t *testing.T) {
+	pool, repo, txManager := setupTestDB(t)
+
+	tripID := uuid.New()
+	cleanupTrip(t, pool, tripID)
+
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	tr := model.Trip{
+		ID:         tripID,
+		UserID:     uuid.New(),
+		DriverID:   uuid.New(),
+		StartPoint: model.Coordinates{Latitude: 55.75, Longitude: 37.61},
+		EndPoint:   model.Coordinates{Latitude: 55.80, Longitude: 37.70},
+		Price:      500,
+		Status:     model.StatusActive,
+		StartedAt:  now,
+		CreatedAt:  now,
+		UpdatedAt:  now,
+	}
+
+	ctx := context.Background()
+	if err := repo.Save(ctx, tr); err != nil {
+		t.Fatalf("failed to save trip: %v", err)
+	}
+
+	expectedErr := errors.New("simulated error during position save")
+	err := txManager.Do(ctx, func(txCtx context.Context) error {
+		pos := model.Position{
+			Coordinates: model.Coordinates{Latitude: 55.76, Longitude: 37.62},
+			RecordedAt:  now.Add(10 * time.Second),
+		}
+		if _, err := repo.SavePosition(txCtx, tripID, pos); err != nil {
+			return err
+		}
+		return expectedErr
+	})
+
+	if !errors.Is(err, expectedErr) {
+		t.Fatalf("expected expectedErr, got %v", err)
+	}
+
+	positions, err := repo.ListPositions(ctx, tripID)
+	if err != nil {
+		t.Fatalf("failed to list positions: %v", err)
+	}
+	if len(positions) != 0 {
+		t.Fatalf("expected 0 positions after rollback, got %d", len(positions))
+	}
+
+	fetchedTrip, err := repo.GetByID(ctx, tripID)
+	if err != nil {
+		t.Fatalf("failed to get trip: %v", err)
+	}
+	if fetchedTrip.LastPositionAt != nil {
+		t.Fatalf("expected last_position_at to remain nil, got %v", fetchedTrip.LastPositionAt)
+	}
+}
+
+func TestIntegrationGetStaleTrips(t *testing.T) {
+	pool, repo, _ := setupTestDB(t)
+
+	staleTripID := uuid.New()
+	cleanupTrip(t, pool, staleTripID)
+
+	freshTripID := uuid.New()
+	cleanupTrip(t, pool, freshTripID)
+
+	completedTripID := uuid.New()
+	cleanupTrip(t, pool, completedTripID)
+
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	ctx := context.Background()
+
+	staleTrip := model.Trip{
+		ID:         staleTripID,
+		UserID:     uuid.New(),
+		DriverID:   uuid.New(),
+		StartPoint: model.Coordinates{Latitude: 55.75, Longitude: 37.61},
+		EndPoint:   model.Coordinates{Latitude: 55.80, Longitude: 37.70},
+		Price:      500,
+		Status:     model.StatusActive,
+		StartedAt:  now.Add(-2 * time.Minute),
+		CreatedAt:  now.Add(-2 * time.Minute),
+		UpdatedAt:  now.Add(-2 * time.Minute),
+	}
+	if err := repo.Save(ctx, staleTrip); err != nil {
+		t.Fatalf("failed to save stale trip: %v", err)
+	}
+
+	freshTrip := model.Trip{
+		ID:         freshTripID,
+		UserID:     uuid.New(),
+		DriverID:   uuid.New(),
+		StartPoint: model.Coordinates{Latitude: 55.75, Longitude: 37.61},
+		EndPoint:   model.Coordinates{Latitude: 55.80, Longitude: 37.70},
+		Price:      500,
+		Status:     model.StatusActive,
+		StartedAt:  now.Add(-2 * time.Minute),
+		CreatedAt:  now.Add(-2 * time.Minute),
+		UpdatedAt:  now.Add(-2 * time.Minute),
+	}
+	if err := repo.Save(ctx, freshTrip); err != nil {
+		t.Fatalf("failed to save fresh trip: %v", err)
+	}
+	freshPos := model.Position{
+		Coordinates: model.Coordinates{Latitude: 55.76, Longitude: 37.62},
+		RecordedAt:  now.Add(-5 * time.Second),
+	}
+	if _, err := repo.SavePosition(ctx, freshTripID, freshPos); err != nil {
+		t.Fatalf("failed to save fresh pos: %v", err)
+	}
+
+	completedTrip := model.Trip{
+		ID:         completedTripID,
+		UserID:     uuid.New(),
+		DriverID:   uuid.New(),
+		StartPoint: model.Coordinates{Latitude: 55.75, Longitude: 37.61},
+		EndPoint:   model.Coordinates{Latitude: 55.80, Longitude: 37.70},
+		Price:      500,
+		Status:     model.StatusActive,
+		StartedAt:  now.Add(-2 * time.Minute),
+		CreatedAt:  now.Add(-2 * time.Minute),
+		UpdatedAt:  now.Add(-2 * time.Minute),
+	}
+	if err := repo.Save(ctx, completedTrip); err != nil {
+		t.Fatalf("failed to save completed trip: %v", err)
+	}
+	if _, err := repo.Finish(ctx, completedTripID, now.Add(-1*time.Minute)); err != nil {
+		t.Fatalf("failed to finish trip: %v", err)
+	}
+
+	staleTrips, err := repo.GetStaleTrips(ctx, 1*time.Minute)
+	if err != nil {
+		t.Fatalf("failed to get stale trips: %v", err)
+	}
+
+	foundStale := false
+	for _, st := range staleTrips {
+		if st.ID == staleTripID {
+			foundStale = true
+		}
+		if st.ID == freshTripID {
+			t.Fatalf("fresh trip should not be in stale trips list")
+		}
+		if st.ID == completedTripID {
+			t.Fatalf("completed trip should not be in stale trips list")
+		}
+	}
+	if !foundStale {
+		t.Fatalf("expected staleTripID %v in stale trips, got %v", staleTripID, staleTrips)
 	}
 }

@@ -84,8 +84,8 @@ func (r *Repository) Finish(ctx context.Context, id uuid.UUID, finishedAt time.T
 		Set("status", string(model.StatusCompleted)).
 		Set("finished_at", finishedAt).
 		Set("updated_at", now).
-		Where(squirrel.Eq{"id": id, "status": string(model.StatusActive)}).
-		Suffix("RETURNING id, user_id, driver_id, start_latitude, start_longitude, end_latitude, end_longitude, price, status, started_at, finished_at, created_at, updated_at").
+		Where(squirrel.Eq{"id": id, statusColumn: string(model.StatusActive)}).
+		Suffix("RETURNING id, user_id, driver_id, start_latitude, start_longitude, end_latitude, end_longitude, price, status, started_at, finished_at, created_at, updated_at, last_position_at").
 		ToSql()
 	if err != nil {
 		return nil, err
@@ -100,7 +100,7 @@ func (r *Repository) Finish(ctx context.Context, id uuid.UUID, finishedAt time.T
 	}
 
 	if errors.Is(err, pgx.ErrNoRows) {
-		checkQuery, checkArgs, checkErr := r.sq.Select("status").From("trips").Where(squirrel.Eq{"id": id}).ToSql()
+		checkQuery, checkArgs, checkErr := r.sq.Select(statusColumn).From("trips").Where(squirrel.Eq{"id": id}).ToSql()
 		if checkErr != nil {
 			return nil, checkErr
 		}

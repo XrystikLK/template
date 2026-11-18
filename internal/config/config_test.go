@@ -44,6 +44,12 @@ func TestConfig_Load_Defaults(t *testing.T) {
 	assert.Equal(t, 2*time.Second, cfg.HTTPReadHeaderTimeout)
 	assert.Equal(t, 5*time.Second, cfg.HTTPWriteTimeout)
 	assert.Equal(t, 30*time.Second, cfg.HTTPIdleTimeout)
+	assert.Equal(t, 30*time.Second, cfg.PositionCheckInterval)
+	assert.Equal(t, 60*time.Second, cfg.PositionStaleAfter)
+	assert.Equal(t, 4, cfg.PositionWorkers)
+	assert.Equal(t, 100, cfg.PositionQueueSize)
+	assert.Equal(t, "http://localhost:8090", cfg.PushHTTPURL)
+	assert.Equal(t, 1*time.Second, cfg.PushRequestTimeout)
 }
 
 func TestConfig_Load_CustomValid(t *testing.T) {
