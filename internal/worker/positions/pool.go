@@ -50,21 +50,17 @@ func (p *Pool) Start(ctx context.Context) {
 
 func (p *Pool) run(ctx context.Context) {
 	for ctx.Err() == nil {
-		select {
-		case <-ctx.Done():
+		task := p.queue.take(ctx)
+		if task == nil {
 			return
-		case task, ok := <-p.queue.ch:
-			if !ok {
-				return
-			}
-			if !p.queue.dequeued(task) {
-				continue
-			}
-			if ctx.Err() == nil {
-				p.process(ctx, task)
-			}
-			p.queue.remove(task)
 		}
+		if !p.queue.dequeued(task) {
+			continue
+		}
+		if ctx.Err() == nil {
+			p.process(ctx, task)
+		}
+		p.queue.remove(task)
 	}
 }
 

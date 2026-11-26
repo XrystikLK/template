@@ -64,9 +64,9 @@ func TestCancelTaskByIncomingPosition(t *testing.T) {
 	gomock.InOrder(
 		mockMetrics.EXPECT().SetQueueSize(int64(1)),
 		mockMetrics.EXPECT().IncStaleChecks(gomock.Any(), "queued"),
-		mockMetrics.EXPECT().SetQueueSize(int64(2)),
-		mockMetrics.EXPECT().IncStaleChecks(gomock.Any(), "queued"),
+		mockMetrics.EXPECT().SetQueueSize(int64(0)),
 		mockMetrics.EXPECT().SetQueueSize(int64(1)),
+		mockMetrics.EXPECT().IncStaleChecks(gomock.Any(), "queued"),
 		mockMetrics.EXPECT().SetQueueSize(int64(0)),
 	)
 
@@ -204,6 +204,7 @@ func TestGracefulShutdownNoGoroutineLeaks(t *testing.T) {
 		1,
 		30*time.Second,
 		60*time.Second,
+		100,
 		time.Minute,
 		nil,
 		nil,
@@ -217,10 +218,10 @@ func TestGracefulShutdownNoGoroutineLeaks(t *testing.T) {
 	scanStarted := make(chan struct{})
 	scanStopped := make(chan error, 1)
 	gomock.InOrder(
-		mockRepo.EXPECT().GetStaleTrips(gomock.Any(), gomock.Any()).
+		mockRepo.EXPECT().GetStaleTrips(gomock.Any(), gomock.Any(), gomock.Any()).
 			Return([]model.StaleTrip{first, second}, nil),
-		mockRepo.EXPECT().GetStaleTrips(gomock.Any(), gomock.Any()).
-			DoAndReturn(func(ctx context.Context, _ time.Duration) ([]model.StaleTrip, error) {
+		mockRepo.EXPECT().GetStaleTrips(gomock.Any(), gomock.Any(), gomock.Any()).
+			DoAndReturn(func(ctx context.Context, _ time.Duration, _ model.StaleTripPage) ([]model.StaleTrip, error) {
 				close(scanStarted)
 				<-ctx.Done()
 				scanStopped <- ctx.Err()
@@ -324,15 +325,15 @@ func TestScannerNonOverlappingTicks(t *testing.T) {
 	var callCount atomic.Int32
 
 	mockRepo.EXPECT().
-		GetStaleTrips(gomock.Any(), gomock.Any()).
-		DoAndReturn(func(_ context.Context, _ time.Duration) ([]model.StaleTrip, error) {
+		GetStaleTrips(gomock.Any(), gomock.Any(), gomock.Any()).
+		DoAndReturn(func(_ context.Context, _ time.Duration, _ model.StaleTripPage) ([]model.StaleTrip, error) {
 			callCount.Add(1)
 			close(startFirst)
 			<-finishFirst
 			return nil, nil
 		})
 
-	scanner := positions.NewScanner(mockRepo, q, ticker, 60*time.Second, nil, nil)
+	scanner := positions.NewScanner(mockRepo, q, ticker, 60*time.Second, 100, nil, nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

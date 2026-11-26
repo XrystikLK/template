@@ -12,7 +12,7 @@ import (
 
 type (
 	tripRepository interface {
-		GetStaleTrips(ctx context.Context, staleAfter time.Duration) ([]model.StaleTrip, error)
+		GetStaleTrips(ctx context.Context, staleAfter time.Duration, page model.StaleTripPage) ([]model.StaleTrip, error)
 	}
 
 	pushGateway interface {
@@ -27,6 +27,7 @@ type (
 
 	metrics interface {
 		IncStaleChecks(ctx context.Context, result string)
+		RecordStaleRowsRead(ctx context.Context, count int64)
 		SetQueueSize(size int64)
 		AddActiveWorkers(delta int64)
 		IncPositionRequests(ctx context.Context, result string)

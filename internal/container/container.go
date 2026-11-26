@@ -74,6 +74,7 @@ func New(ctx context.Context, cfg *config.Config) (*Container, error) {
 		cfg.PositionWorkers,
 		cfg.PositionCheckInterval,
 		cfg.PositionStaleAfter,
+		cfg.PositionScanBatchSize,
 		cfg.PushRequestTimeout,
 		tel.Tracer,
 		logger,

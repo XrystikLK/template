@@ -37,6 +37,7 @@ type Config struct {
 	PositionCheckInterval time.Duration
 	PositionStaleAfter    time.Duration
 	PositionWorkers       int
+	PositionScanBatchSize int
 	PositionQueueSize     int
 	PushHTTPURL           string
 	PushRequestTimeout    time.Duration
@@ -161,6 +162,11 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 
+	batchSize, err := parsePositiveIntEnv("POSITION_SCAN_BATCH_SIZE", 100)
+	if err != nil {
+		return nil, err
+	}
+
 	pushURL := os.Getenv("PUSH_HTTP_URL")
 	if strings.TrimSpace(pushURL) == "" {
 		pushURL = "http://localhost:8090"
@@ -194,6 +200,7 @@ func Load() (*Config, error) {
 		PositionCheckInterval:    checkInterval,
 		PositionStaleAfter:       staleAfter,
 		PositionWorkers:          int(workers),
+		PositionScanBatchSize:    int(batchSize),
 		PositionQueueSize:        int(queueSize),
 		PushHTTPURL:              pushURL,
 		PushRequestTimeout:       pushTimeout,

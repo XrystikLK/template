@@ -44,18 +44,18 @@ func (m *MocktripRepository) EXPECT() *MocktripRepositoryMockRecorder {
 }
 
 // GetStaleTrips mocks base method.
-func (m *MocktripRepository) GetStaleTrips(ctx context.Context, staleAfter time.Duration) ([]model.StaleTrip, error) {
+func (m *MocktripRepository) GetStaleTrips(ctx context.Context, staleAfter time.Duration, page model.StaleTripPage) ([]model.StaleTrip, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetStaleTrips", ctx, staleAfter)
+	ret := m.ctrl.Call(m, "GetStaleTrips", ctx, staleAfter, page)
 	ret0, _ := ret[0].([]model.StaleTrip)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // GetStaleTrips indicates an expected call of GetStaleTrips.
-func (mr *MocktripRepositoryMockRecorder) GetStaleTrips(ctx, staleAfter any) *gomock.Call {
+func (mr *MocktripRepositoryMockRecorder) GetStaleTrips(ctx, staleAfter, page any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetStaleTrips", reflect.TypeOf((*MocktripRepository)(nil).GetStaleTrips), ctx, staleAfter)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetStaleTrips", reflect.TypeOf((*MocktripRepository)(nil).GetStaleTrips), ctx, staleAfter, page)
 }
 
 // MockpushGateway is a mock of pushGateway interface.
@@ -241,6 +241,18 @@ func (m *Mockmetrics) RecordPositionRequestDuration(ctx context.Context, duratio
 func (mr *MockmetricsMockRecorder) RecordPositionRequestDuration(ctx, durationSec, result any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RecordPositionRequestDuration", reflect.TypeOf((*Mockmetrics)(nil).RecordPositionRequestDuration), ctx, durationSec, result)
+}
+
+// RecordStaleRowsRead mocks base method.
+func (m *Mockmetrics) RecordStaleRowsRead(ctx context.Context, count int64) {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "RecordStaleRowsRead", ctx, count)
+}
+
+// RecordStaleRowsRead indicates an expected call of RecordStaleRowsRead.
+func (mr *MockmetricsMockRecorder) RecordStaleRowsRead(ctx, count any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RecordStaleRowsRead", reflect.TypeOf((*Mockmetrics)(nil).RecordStaleRowsRead), ctx, count)
 }
 
 // SetQueueSize mocks base method.

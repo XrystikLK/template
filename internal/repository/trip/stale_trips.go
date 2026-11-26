@@ -10,19 +10,24 @@ import (
 	"github.com/XrystikLK/template/internal/model"
 )
 
-func (r *Repository) GetStaleTrips(ctx context.Context, staleAfter time.Duration) ([]model.StaleTrip, error) {
+func (r *Repository) GetStaleTrips(ctx context.Context, staleAfter time.Duration, page model.StaleTripPage) ([]model.StaleTrip, error) {
 	ctx, cancel := context.WithTimeout(ctx, r.queryTimeout)
 	defer cancel()
 
 	var exec executor = transaction.GetExecutor(ctx, r.pool)
 
-	staleMicros := staleAfter.Microseconds()
-	query, args, err := r.sq.Select("id", "driver_id", "started_at", "last_position_at").
+	q := r.sq.Select("id", "driver_id", "started_at", "last_position_at").
 		From("trips").
 		Where("status = 'active'").
-		Where(squirrel.Expr("COALESCE(last_position_at, started_at) < now() - (? * interval '1 microsecond')", staleMicros)).
-		OrderBy("COALESCE(last_position_at, started_at) ASC").
-		ToSql()
+		Where(squirrel.Expr("COALESCE(last_position_at, started_at) < ?::timestamptz - (? * interval '1 microsecond')",
+			page.ScanAt, staleAfter.Microseconds())).
+		OrderBy("COALESCE(last_position_at, started_at) ASC", "id ASC").
+		Suffix("LIMIT ?", page.Limit)
+	if page.After != nil {
+		q = q.Where(squirrel.Expr("(COALESCE(last_position_at, started_at), id) > (?, ?)",
+			page.After.LastActivityAt(), page.After.ID))
+	}
+	query, args, err := q.ToSql()
 	if err != nil {
 		return nil, err
 	}

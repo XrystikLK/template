@@ -2,6 +2,7 @@ package positions
 
 import (
 	"context"
+	"slices"
 	"sync"
 	"time"
 
@@ -10,13 +11,17 @@ import (
 )
 
 type Task struct {
-	TripID      uuid.UUID
-	DriverID    uuid.UUID
-	SpanContext trace.SpanContext
+	TripID         uuid.UUID
+	DriverID       uuid.UUID
+	LastActivityAt time.Time
+	SpanContext    trace.SpanContext
 }
 
 type Queue struct {
-	ch            chan *Task
+	pending       []*Task
+	capacity      int
+	ready         chan struct{}
+	done          chan struct{}
 	mu            sync.Mutex
 	inFlight      map[uuid.UUID]*Task
 	nextRequest   map[uuid.UUID]time.Time
@@ -32,7 +37,10 @@ func NewQueue(capacity int, metrics metrics, logger logger) *Queue {
 		capacity = 100
 	}
 	return &Queue{
-		ch:       make(chan *Task, capacity),
+		pending:  make([]*Task, 0, capacity),
+		capacity: capacity,
+		ready:    make(chan struct{}, 1),
+		done:     make(chan struct{}),
 		inFlight: make(map[uuid.UUID]*Task),
 		metrics:  metrics,
 		logger:   logger,
@@ -60,30 +68,51 @@ func (q *Queue) tryPush(ctx context.Context, task Task, fromScan bool) bool {
 		return false
 	}
 
-	select {
-	case q.ch <- &task:
-		q.inFlight[task.TripID] = &task
-		q.recordSize()
-		q.mu.Unlock()
-		if q.metrics != nil {
-			q.metrics.IncStaleChecks(ctx, "queued")
+	var evicted *Task
+	if len(q.pending) == q.capacity {
+		newest := q.pending[0]
+		if !task.LastActivityAt.Before(newest.LastActivityAt) {
+			q.mu.Unlock()
+			q.recordDrop(ctx, task.TripID)
+			return false
 		}
-		return true
-	default:
-		q.mu.Unlock()
-		if q.metrics != nil {
-			q.metrics.IncStaleChecks(ctx, "dropped")
-			q.metrics.IncPositionRequests(ctx, "dropped")
-		}
-		if q.logger != nil {
-			q.logger.WarnContext(ctx, "positions queue is full, task dropped", "trip_id", task.TripID.String())
-		}
-		return false
+		evicted = newest
+		delete(q.inFlight, newest.TripID)
+		q.pending = slices.Delete(q.pending, 0, 1)
+	}
+	index, _ := slices.BinarySearchFunc(q.pending, &task, func(queued, incoming *Task) int {
+		return incoming.LastActivityAt.Compare(queued.LastActivityAt)
+	})
+	q.pending = slices.Insert(q.pending, index, &task)
+	q.inFlight[task.TripID] = &task
+	q.recordSize()
+	q.signalReady()
+	q.mu.Unlock()
+	if evicted != nil {
+		q.recordDrop(ctx, evicted.TripID)
+	}
+	if q.metrics != nil {
+		q.metrics.IncStaleChecks(ctx, "queued")
+	}
+	return true
+}
+
+func (q *Queue) recordDrop(ctx context.Context, tripID uuid.UUID) {
+	if q.metrics != nil {
+		q.metrics.IncStaleChecks(ctx, "dropped")
+		q.metrics.IncPositionRequests(ctx, "dropped")
+	}
+	if q.logger != nil {
+		q.logger.WarnContext(ctx, "positions queue is full, task dropped", "trip_id", tripID.String())
 	}
 }
 
 func (q *Queue) Cancel(tripID uuid.UUID) {
 	q.mu.Lock()
+	if index := slices.Index(q.pending, q.inFlight[tripID]); index >= 0 {
+		q.pending = slices.Delete(q.pending, index, index+1)
+		q.recordSize()
+	}
 	delete(q.inFlight, tripID)
 	if q.scanCanceled != nil {
 		q.scanCanceled[tripID] = struct{}{}
@@ -94,7 +123,6 @@ func (q *Queue) Cancel(tripID uuid.UUID) {
 func (q *Queue) dequeued(task *Task) bool {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	q.recordSize()
 	if q.inFlight[task.TripID] != task {
 		return false
 	}
@@ -131,8 +159,42 @@ func (q *Queue) remove(task *Task) {
 
 func (q *Queue) recordSize() {
 	if q.metrics != nil {
-		q.metrics.SetQueueSize(int64(len(q.ch)))
+		q.metrics.SetQueueSize(int64(len(q.pending)))
 	}
+}
+
+func (q *Queue) signalReady() {
+	select {
+	case q.ready <- struct{}{}:
+	default:
+	}
+}
+
+func (q *Queue) take(ctx context.Context) *Task {
+	for ctx.Err() == nil {
+		q.mu.Lock()
+		if len(q.pending) > 0 {
+			last := len(q.pending) - 1
+			task := q.pending[last]
+			q.pending[last] = nil
+			q.pending = q.pending[:last]
+			q.recordSize()
+			if last > 0 {
+				q.signalReady()
+			}
+			q.mu.Unlock()
+			return task
+		}
+		q.mu.Unlock()
+		select {
+		case <-q.ready:
+		case <-q.done:
+			return nil
+		case <-ctx.Done():
+			return nil
+		}
+	}
+	return nil
 }
 
 func (q *Queue) Close() {
@@ -140,6 +202,6 @@ func (q *Queue) Close() {
 	defer q.mu.Unlock()
 	if !q.closed {
 		q.closed = true
-		close(q.ch)
+		close(q.done)
 	}
 }

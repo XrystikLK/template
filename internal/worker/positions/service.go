@@ -26,6 +26,7 @@ func NewService(
 	workersCount int,
 	checkInterval time.Duration,
 	staleAfter time.Duration,
+	batchSize int,
 	reqTimeout time.Duration,
 	tracer trace.Tracer,
 	logger logger,
@@ -38,7 +39,7 @@ func NewService(
 	q := NewQueue(queueSize, metrics, logger)
 	q.checkInterval = checkInterval
 	q.nextRequest = make(map[uuid.UUID]time.Time)
-	scanner := NewScanner(repo, q, ticker, staleAfter, tracer, logger)
+	scanner := NewScanner(repo, q, ticker, staleAfter, batchSize, tracer, logger)
 	pool := NewPool(q, gateway, workersCount, reqTimeout, tracer, logger, metrics)
 
 	return &Service{

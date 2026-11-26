@@ -20,3 +20,16 @@ type StaleTrip struct {
 	LastPositionAt *time.Time
 	StartedAt      time.Time
 }
+
+func (t StaleTrip) LastActivityAt() time.Time {
+	if t.LastPositionAt != nil {
+		return *t.LastPositionAt
+	}
+	return t.StartedAt
+}
+
+type StaleTripPage struct {
+	ScanAt time.Time
+	After  *StaleTrip
+	Limit  int
+}

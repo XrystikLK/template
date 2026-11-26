@@ -5,6 +5,8 @@ import (
 	"time"
 
 	"go.opentelemetry.io/otel/trace"
+
+	"github.com/XrystikLK/template/internal/model"
 )
 
 type Scanner struct {
@@ -12,18 +14,23 @@ type Scanner struct {
 	queue      *Queue
 	ticker     Ticker
 	staleAfter time.Duration
+	batchSize  int
 	tracer     trace.Tracer
 	logger     logger
 	cancel     context.CancelFunc
 	done       chan struct{}
 }
 
-func NewScanner(repo tripRepository, queue *Queue, ticker Ticker, staleAfter time.Duration, tracer trace.Tracer, logger logger) *Scanner {
+func NewScanner(repo tripRepository, queue *Queue, ticker Ticker, staleAfter time.Duration, batchSize int, tracer trace.Tracer, logger logger) *Scanner {
+	if batchSize <= 0 {
+		batchSize = 100
+	}
 	return &Scanner{
 		repo:       repo,
 		queue:      queue,
 		ticker:     ticker,
 		staleAfter: staleAfter,
+		batchSize:  batchSize,
 		tracer:     tracer,
 		logger:     logger,
 	}
@@ -48,7 +55,8 @@ func (s *Scanner) Start(ctx context.Context) {
 }
 
 func (s *Scanner) scan(ctx context.Context) {
-	s.queue.beginScan(time.Now())
+	scanAt := time.Now()
+	s.queue.beginScan(scanAt)
 	defer s.queue.endScan()
 	var span trace.Span
 	scanCtx := ctx
@@ -57,35 +65,43 @@ func (s *Scanner) scan(ctx context.Context) {
 		defer span.End()
 	}
 
-	trips, err := s.repo.GetStaleTrips(scanCtx, s.staleAfter)
-	if ctx.Err() != nil {
-		return
-	}
-	if err != nil {
-		if s.logger != nil {
-			s.logger.ErrorContext(scanCtx, "failed to get stale trips", "error", err.Error())
-		}
-		if span != nil {
-			span.RecordError(err)
-		}
-		return
-	}
-
 	var spanCtx trace.SpanContext
 	if span != nil {
 		spanCtx = span.SpanContext()
 	}
 
-	for _, t := range trips {
+	var rowsRead int64
+	if s.queue.metrics != nil {
+		defer func() { s.queue.metrics.RecordStaleRowsRead(scanCtx, rowsRead) }()
+	}
+	page := model.StaleTripPage{ScanAt: scanAt, Limit: s.batchSize}
+	for scanCtx.Err() == nil {
+		trips, err := s.repo.GetStaleTrips(scanCtx, s.staleAfter, page)
+		rowsRead += int64(len(trips))
 		if scanCtx.Err() != nil {
 			return
 		}
-		task := Task{
-			TripID:      t.ID,
-			DriverID:    t.DriverID,
-			SpanContext: spanCtx,
+		if err != nil {
+			if s.logger != nil {
+				s.logger.ErrorContext(scanCtx, "failed to get stale trips", "error", err.Error())
+			}
+			if span != nil {
+				span.RecordError(err)
+			}
+			return
 		}
-		_ = s.queue.tryPush(scanCtx, task, true)
+		for _, t := range trips {
+			if scanCtx.Err() != nil {
+				return
+			}
+			_ = s.queue.tryPush(scanCtx, Task{
+				TripID: t.ID, DriverID: t.DriverID, LastActivityAt: t.LastActivityAt(), SpanContext: spanCtx,
+			}, true)
+		}
+		if len(trips) < page.Limit {
+			return
+		}
+		page.After = &trips[len(trips)-1]
 	}
 }
 

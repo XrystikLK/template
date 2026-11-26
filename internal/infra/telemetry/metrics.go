@@ -16,6 +16,7 @@ type Metrics struct {
 	PositionsSaved  metric.Int64Counter
 
 	StaleChecks              metric.Int64Counter
+	StaleRowsRead            metric.Int64Histogram
 	PositionRequests         metric.Int64Counter
 	PositionRequestsDuration metric.Float64Histogram
 
@@ -87,6 +88,15 @@ func NewMetrics(meter metric.Meter) (*Metrics, error) {
 		return nil, err
 	}
 
+	staleRowsRead, err := meter.Int64Histogram(
+		"tripgo.stale_scan.rows",
+		metric.WithDescription("Number of stale trip rows read in one scan"),
+		metric.WithUnit("{row}"),
+	)
+	if err != nil {
+		return nil, err
+	}
+
 	posDuration, err := meter.Float64Histogram(
 		"tripgo.position_requests.duration",
 		metric.WithDescription("Duration of position requests to push service"),
@@ -103,6 +113,7 @@ func NewMetrics(meter metric.Meter) (*Metrics, error) {
 		TripsCompleted:           completed,
 		PositionsSaved:           saved,
 		StaleChecks:              staleChecks,
+		StaleRowsRead:            staleRowsRead,
 		PositionRequests:         posRequests,
 		PositionRequestsDuration: posDuration,
 	}
@@ -134,6 +145,12 @@ func NewMetrics(meter metric.Meter) (*Metrics, error) {
 	}
 
 	return m, nil
+}
+
+func (m *Metrics) RecordStaleRowsRead(ctx context.Context, count int64) {
+	if m != nil && m.StaleRowsRead != nil {
+		m.StaleRowsRead.Record(ctx, count)
+	}
 }
 
 func (m *Metrics) IncTripsCreated(ctx context.Context) {

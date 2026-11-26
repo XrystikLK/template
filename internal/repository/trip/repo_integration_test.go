@@ -511,6 +511,14 @@ func TestIntegrationGetStaleTrips(t *testing.T) {
 		t.Fatalf("failed to save stale trip: %v", err)
 	}
 
+	tiedTrip := staleTrip
+	tiedTrip.ID = uuid.New()
+	tiedTrip.DriverID = uuid.New()
+	cleanupTrip(t, pool, tiedTrip.ID)
+	if err := repo.Save(ctx, tiedTrip); err != nil {
+		t.Fatalf("failed to save trip with matching activity time: %v", err)
+	}
+
 	freshTrip := model.Trip{
 		ID:         freshTripID,
 		UserID:     uuid.New(),
@@ -553,7 +561,7 @@ func TestIntegrationGetStaleTrips(t *testing.T) {
 		t.Fatalf("failed to finish trip: %v", err)
 	}
 
-	staleTrips, err := repo.GetStaleTrips(ctx, 1*time.Minute)
+	staleTrips, err := repo.GetStaleTrips(ctx, time.Minute, model.StaleTripPage{ScanAt: now, Limit: 100})
 	if err != nil {
 		t.Fatalf("failed to get stale trips: %v", err)
 	}
@@ -572,5 +580,21 @@ func TestIntegrationGetStaleTrips(t *testing.T) {
 	}
 	if !foundStale {
 		t.Fatalf("expected staleTripID %v in stale trips, got %v", staleTripID, staleTrips)
+	}
+
+	firstID, secondID := staleTripID, tiedTrip.ID
+	if firstID.String() > secondID.String() {
+		firstID, secondID = secondID, firstID
+	}
+	next, err := repo.GetStaleTrips(ctx, time.Minute, model.StaleTripPage{
+		ScanAt: now,
+		After:  &model.StaleTrip{ID: firstID, StartedAt: staleTrip.StartedAt},
+		Limit:  1,
+	})
+	if err != nil {
+		t.Fatalf("failed to read next stale trip page: %v", err)
+	}
+	if len(next) != 1 || next[0].ID != secondID {
+		t.Fatalf("expected next page to contain tied trip %v, got %v", secondID, next)
 	}
 }
