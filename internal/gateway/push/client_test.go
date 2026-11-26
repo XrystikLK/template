@@ -33,6 +33,12 @@ func TestNewValidation(t *testing.T) {
 	_, err = push.New("not-a-valid-url", time.Second, tracer)
 	require.Error(t, err)
 
+	_, err = push.New("ftp://localhost:8090", time.Second, tracer)
+	require.Error(t, err)
+
+	_, err = push.New("http://localhost:8090?route=other", time.Second, tracer)
+	require.Error(t, err)
+
 	client, err := push.New("http://localhost:8090", 0, tracer)
 	require.NoError(t, err)
 	require.NotNil(t, client)

@@ -3,6 +3,7 @@ package positions
 import (
 	"context"
 	"sync"
+	"time"
 
 	"github.com/google/uuid"
 	"go.opentelemetry.io/otel/trace"
@@ -15,11 +16,15 @@ type Task struct {
 }
 
 type Queue struct {
-	ch       chan Task
-	mu       sync.Mutex
-	inFlight map[uuid.UUID]struct{}
-	metrics  metrics
-	logger   logger
+	ch            chan *Task
+	mu            sync.Mutex
+	inFlight      map[uuid.UUID]*Task
+	nextRequest   map[uuid.UUID]time.Time
+	scanCanceled  map[uuid.UUID]struct{}
+	checkInterval time.Duration
+	closed        bool
+	metrics       metrics
+	logger        logger
 }
 
 func NewQueue(capacity int, metrics metrics, logger logger) *Queue {
@@ -27,17 +32,27 @@ func NewQueue(capacity int, metrics metrics, logger logger) *Queue {
 		capacity = 100
 	}
 	return &Queue{
-		ch:       make(chan Task, capacity),
-		inFlight: make(map[uuid.UUID]struct{}),
+		ch:       make(chan *Task, capacity),
+		inFlight: make(map[uuid.UUID]*Task),
 		metrics:  metrics,
 		logger:   logger,
 	}
 }
 
 func (q *Queue) TryPush(ctx context.Context, task Task) bool {
+	return q.tryPush(ctx, task, false)
+}
+
+func (q *Queue) tryPush(ctx context.Context, task Task, fromScan bool) bool {
 	q.mu.Lock()
 
-	if _, exists := q.inFlight[task.TripID]; exists {
+	if q.closed {
+		q.mu.Unlock()
+		return false
+	}
+
+	_, canceled := q.scanCanceled[task.TripID]
+	if (fromScan && canceled) || q.inFlight[task.TripID] != nil || time.Now().Before(q.nextRequest[task.TripID]) {
 		q.mu.Unlock()
 		if q.metrics != nil {
 			q.metrics.IncStaleChecks(ctx, "duplicate")
@@ -46,13 +61,13 @@ func (q *Queue) TryPush(ctx context.Context, task Task) bool {
 	}
 
 	select {
-	case q.ch <- task:
-		q.inFlight[task.TripID] = struct{}{}
+	case q.ch <- &task:
+		q.inFlight[task.TripID] = &task
+		q.recordSize()
+		q.mu.Unlock()
 		if q.metrics != nil {
-			q.metrics.SetQueueSize(int64(len(q.ch)))
 			q.metrics.IncStaleChecks(ctx, "queued")
 		}
-		q.mu.Unlock()
 		return true
 	default:
 		q.mu.Unlock()
@@ -70,29 +85,61 @@ func (q *Queue) TryPush(ctx context.Context, task Task) bool {
 func (q *Queue) Cancel(tripID uuid.UUID) {
 	q.mu.Lock()
 	delete(q.inFlight, tripID)
-	q.mu.Unlock()
-}
-
-func (q *Queue) Channel() <-chan Task {
-	return q.ch
-}
-
-func (q *Queue) IsActive(tripID uuid.UUID) bool {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	_, exists := q.inFlight[tripID]
-	return exists
-}
-
-func (q *Queue) Remove(tripID uuid.UUID) {
-	q.mu.Lock()
-	delete(q.inFlight, tripID)
-	if q.metrics != nil {
-		q.metrics.SetQueueSize(int64(len(q.ch)))
+	if q.scanCanceled != nil {
+		q.scanCanceled[tripID] = struct{}{}
 	}
 	q.mu.Unlock()
 }
 
+func (q *Queue) dequeued(task *Task) bool {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.recordSize()
+	if q.inFlight[task.TripID] != task {
+		return false
+	}
+	if q.checkInterval > 0 {
+		q.nextRequest[task.TripID] = time.Now().Add(q.checkInterval)
+	}
+	return true
+}
+
+func (q *Queue) beginScan(now time.Time) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.scanCanceled = make(map[uuid.UUID]struct{})
+	for id, deadline := range q.nextRequest {
+		if !now.Before(deadline) {
+			delete(q.nextRequest, id)
+		}
+	}
+}
+
+func (q *Queue) endScan() {
+	q.mu.Lock()
+	q.scanCanceled = nil
+	q.mu.Unlock()
+}
+
+func (q *Queue) remove(task *Task) {
+	q.mu.Lock()
+	if q.inFlight[task.TripID] == task {
+		delete(q.inFlight, task.TripID)
+	}
+	q.mu.Unlock()
+}
+
+func (q *Queue) recordSize() {
+	if q.metrics != nil {
+		q.metrics.SetQueueSize(int64(len(q.ch)))
+	}
+}
+
 func (q *Queue) Close() {
-	close(q.ch)
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if !q.closed {
+		q.closed = true
+		close(q.ch)
+	}
 }

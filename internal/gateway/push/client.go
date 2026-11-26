@@ -13,8 +13,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -36,8 +38,12 @@ func New(baseURL string, timeout time.Duration, tracer trace.Tracer) (*Client, e
 		return nil, errors.New("push service baseURL cannot be empty")
 	}
 	parsedURL, err := url.Parse(baseURL)
-	if err != nil || parsedURL.Scheme == "" || parsedURL.Host == "" {
-		return nil, fmt.Errorf("invalid push service baseURL %q: %w", baseURL, err)
+	if err != nil {
+		return nil, errors.New("invalid push service base URL")
+	}
+	if (parsedURL.Scheme != "http" && parsedURL.Scheme != "https") || parsedURL.Hostname() == "" ||
+		parsedURL.ForceQuery || parsedURL.RawQuery != "" || parsedURL.Fragment != "" || parsedURL.User != nil {
+		return nil, errors.New("push service base URL must use http or https and contain a hostname without credentials, query or fragment")
 	}
 
 	if timeout <= 0 {
@@ -45,7 +51,8 @@ func New(baseURL string, timeout time.Duration, tracer trace.Tracer) (*Client, e
 	}
 
 	httpClient := &http.Client{
-		Timeout: timeout,
+		Timeout:   timeout,
+		Transport: http.DefaultTransport.(*http.Transport).Clone(),
 	}
 
 	return &Client{
@@ -53,6 +60,10 @@ func New(baseURL string, timeout time.Duration, tracer trace.Tracer) (*Client, e
 		httpClient: httpClient,
 		tracer:     tracer,
 	}, nil
+}
+
+func (c *Client) CloseIdleConnections() {
+	c.httpClient.CloseIdleConnections()
 }
 
 type pushData struct {
@@ -106,6 +117,7 @@ func (c *Client) RequestPosition(ctx context.Context, driverID, tripID uuid.UUID
 		return fmt.Errorf("%w: failed to create request: %v", ErrTransport, err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	otel.GetTextMapPropagator().Inject(ctx, propagation.HeaderCarrier(req.Header))
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {

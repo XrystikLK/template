@@ -2,6 +2,7 @@ package positions
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -9,9 +10,12 @@ import (
 )
 
 type Service struct {
-	queue   *Queue
-	scanner *Scanner
-	pool    *Pool
+	queue         *Queue
+	scanner       *Scanner
+	pool          *Pool
+	startOnce     sync.Once
+	workersDone   chan struct{}
+	cancelWorkers context.CancelFunc
 }
 
 func NewService(
@@ -32,6 +36,8 @@ func NewService(
 	}
 
 	q := NewQueue(queueSize, metrics, logger)
+	q.checkInterval = checkInterval
+	q.nextRequest = make(map[uuid.UUID]time.Time)
 	scanner := NewScanner(repo, q, ticker, staleAfter, tracer, logger)
 	pool := NewPool(q, gateway, workersCount, reqTimeout, tracer, logger, metrics)
 
@@ -43,28 +49,38 @@ func NewService(
 }
 
 func (s *Service) Start(ctx context.Context) {
-	s.pool.Start(ctx)
-	s.scanner.Start(ctx)
+	s.startOnce.Do(func() {
+		workerCtx, cancel := context.WithCancel(ctx)
+		s.cancelWorkers = cancel
+		s.workersDone = make(chan struct{})
+		s.pool.Start(workerCtx)
+		s.scanner.Start(ctx)
+		go func() {
+			s.pool.Wait()
+			close(s.workersDone)
+		}()
+	})
 }
 
 func (s *Service) Cancel(tripID uuid.UUID) {
 	s.queue.Cancel(tripID)
 }
 
-func (s *Service) StopScanner() {
-	s.scanner.Stop()
-}
-
-func (s *Service) StopWorkers(ctx context.Context) {
+func (s *Service) Shutdown(ctx context.Context) {
+	s.startOnce.Do(func() {})
+	if s.cancelWorkers != nil {
+		defer s.cancelWorkers()
+	}
+	s.scanner.Stop(ctx)
+	if ctx.Err() != nil && s.cancelWorkers != nil {
+		s.cancelWorkers()
+	}
 	s.queue.Close()
-	done := make(chan struct{})
-	go func() {
-		s.pool.Wait()
-		close(done)
-	}()
-
+	if s.workersDone == nil {
+		return
+	}
 	select {
-	case <-done:
+	case <-s.workersDone:
 	case <-ctx.Done():
 	}
 }

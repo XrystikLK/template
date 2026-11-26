@@ -43,31 +43,44 @@ func (p *Pool) Start(ctx context.Context) {
 		p.wg.Add(1)
 		go func() {
 			defer p.wg.Done()
-			for task := range p.queue.Channel() {
-				if !p.queue.IsActive(task.TripID) {
-					continue
-				}
-
-				p.process(ctx, task)
-				p.queue.Remove(task.TripID)
-			}
+			p.run(ctx)
 		}()
 	}
 }
 
-func (p *Pool) process(ctx context.Context, task Task) {
+func (p *Pool) run(ctx context.Context) {
+	for ctx.Err() == nil {
+		select {
+		case <-ctx.Done():
+			return
+		case task, ok := <-p.queue.ch:
+			if !ok {
+				return
+			}
+			if !p.queue.dequeued(task) {
+				continue
+			}
+			if ctx.Err() == nil {
+				p.process(ctx, task)
+			}
+			p.queue.remove(task)
+		}
+	}
+}
+
+func (p *Pool) process(ctx context.Context, task *Task) {
 	if p.metrics != nil {
 		p.metrics.AddActiveWorkers(1)
 		defer p.metrics.AddActiveWorkers(-1)
 	}
 
-	var opts []trace.SpanStartOption
+	opts := []trace.SpanStartOption{trace.WithNewRoot()}
 	if task.SpanContext.IsValid() {
 		opts = append(opts, trace.WithLinks(trace.Link{SpanContext: task.SpanContext}))
 	}
 
 	var span trace.Span
-	procCtx := context.Background()
+	procCtx := ctx
 	if p.tracer != nil {
 		procCtx, span = p.tracer.Start(procCtx, "worker.process_position_request", opts...)
 		defer span.End()

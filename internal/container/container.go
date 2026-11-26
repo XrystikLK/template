@@ -39,7 +39,7 @@ type Container struct {
 	logger          *slog.Logger
 	positionsWorker *workerPositions.Service
 	workerCtx       context.Context
-	workerCancel    context.CancelFunc
+	pushClient      *push.Client
 }
 
 func New(ctx context.Context, cfg *config.Config) (*Container, error) {
@@ -119,16 +119,14 @@ func New(ctx context.Context, cfg *config.Config) (*Container, error) {
 		IdleTimeout:       cfg.HTTPIdleTimeout,
 	}
 
-	workerCtx, workerCancel := context.WithCancel(context.Background())
-
 	return &Container{
 		server:          httpServer,
 		pool:            pool,
 		telemetry:       tel,
 		logger:          logger,
 		positionsWorker: positionsWorker,
-		workerCtx:       workerCtx,
-		workerCancel:    workerCancel,
+		workerCtx:       context.WithoutCancel(ctx),
+		pushClient:      pushGateway,
 	}, nil
 }
 
@@ -146,12 +144,11 @@ func (c *Container) Shutdown(ctx context.Context) error {
 	}
 
 	if c.positionsWorker != nil {
-		c.positionsWorker.StopScanner()
-		c.positionsWorker.StopWorkers(ctx)
+		c.positionsWorker.Shutdown(ctx)
 	}
 
-	if c.workerCancel != nil {
-		c.workerCancel()
+	if c.pushClient != nil {
+		c.pushClient.CloseIdleConnections()
 	}
 
 	if c.telemetry != nil {

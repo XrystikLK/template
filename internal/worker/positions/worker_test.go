@@ -21,27 +21,6 @@ func TestMain(m *testing.M) {
 	goleak.VerifyTestMain(m)
 }
 
-type fakeTicker struct {
-	ch chan time.Time
-}
-
-func newFakeTicker() *fakeTicker {
-	return &fakeTicker{ch: make(chan time.Time)}
-}
-
-func (f *fakeTicker) Chan() <-chan time.Time {
-	return f.ch
-}
-
-func (f *fakeTicker) Stop() {}
-
-func (f *fakeTicker) Tick() {
-	select {
-	case f.ch <- time.Now():
-	default:
-	}
-}
-
 func TestDeduplicationInQueue(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
@@ -72,7 +51,8 @@ func TestCancelTaskByIncomingPosition(t *testing.T) {
 	defer ctrl.Finish()
 
 	mockGateway := NewMockpushGateway(ctrl)
-	q := positions.NewQueue(10, nil, nil)
+	mockMetrics := NewMockmetrics(ctrl)
+	q := positions.NewQueue(10, mockMetrics, nil)
 	pool := positions.NewPool(q, mockGateway, 1, time.Second, nil, nil, nil)
 
 	tripID := uuid.New()
@@ -81,16 +61,65 @@ func TestCancelTaskByIncomingPosition(t *testing.T) {
 		DriverID: uuid.New(),
 	}
 
+	gomock.InOrder(
+		mockMetrics.EXPECT().SetQueueSize(int64(1)),
+		mockMetrics.EXPECT().IncStaleChecks(gomock.Any(), "queued"),
+		mockMetrics.EXPECT().SetQueueSize(int64(2)),
+		mockMetrics.EXPECT().IncStaleChecks(gomock.Any(), "queued"),
+		mockMetrics.EXPECT().SetQueueSize(int64(1)),
+		mockMetrics.EXPECT().SetQueueSize(int64(0)),
+	)
+
 	pushed := q.TryPush(context.Background(), task)
 	require.True(t, pushed)
 
 	q.Cancel(tripID)
+
+	replacement := positions.Task{TripID: tripID, DriverID: uuid.New()}
+	require.True(t, q.TryPush(context.Background(), replacement))
+	mockGateway.EXPECT().RequestPosition(gomock.Any(), replacement.DriverID, tripID)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	pool.Start(ctx)
 	q.Close()
+	pool.Wait()
+}
+
+func TestCompletedTaskDoesNotRemoveReplacement(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	gateway := NewMockpushGateway(ctrl)
+	queue := positions.NewQueue(2, nil, nil)
+	pool := positions.NewPool(queue, gateway, 1, time.Second, nil, nil, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	task := positions.Task{TripID: uuid.New(), DriverID: uuid.New()}
+	replacement := positions.Task{TripID: task.TripID, DriverID: uuid.New()}
+	started := make(chan struct{})
+	release := make(chan struct{})
+	gomock.InOrder(
+		gateway.EXPECT().RequestPosition(gomock.Any(), task.DriverID, task.TripID).
+			DoAndReturn(func(ctx context.Context, _, _ uuid.UUID) error {
+				close(started)
+				select {
+				case <-release:
+					return nil
+				case <-ctx.Done():
+					return ctx.Err()
+				}
+			}),
+		gateway.EXPECT().RequestPosition(gomock.Any(), replacement.DriverID, replacement.TripID),
+	)
+
+	require.True(t, queue.TryPush(ctx, task))
+	pool.Start(ctx)
+	<-started
+	queue.Cancel(task.TripID)
+	require.True(t, queue.TryPush(ctx, replacement))
+	queue.Close()
+	close(release)
 	pool.Wait()
 }
 
@@ -162,32 +191,70 @@ func TestGracefulShutdownNoGoroutineLeaks(t *testing.T) {
 
 	mockRepo := NewMocktripRepository(ctrl)
 	mockGateway := NewMockpushGateway(ctrl)
-	ticker := newFakeTicker()
+	ticker := NewMockTicker(ctrl)
+	ticks := make(chan time.Time)
+	ticker.EXPECT().Chan().Return((<-chan time.Time)(ticks)).AnyTimes()
+	ticker.EXPECT().Stop()
 
 	svc := positions.NewService(
 		mockRepo,
 		mockGateway,
 		ticker,
 		10,
-		2,
+		1,
 		30*time.Second,
 		60*time.Second,
-		time.Second,
+		time.Minute,
 		nil,
 		nil,
 		nil,
 	)
 
+	first := model.StaleTrip{ID: uuid.New(), DriverID: uuid.New()}
+	second := model.StaleTrip{ID: uuid.New(), DriverID: uuid.New()}
+	requestStarted := make(chan struct{})
+	requestStopped := make(chan error, 1)
+	scanStarted := make(chan struct{})
+	scanStopped := make(chan error, 1)
+	gomock.InOrder(
+		mockRepo.EXPECT().GetStaleTrips(gomock.Any(), gomock.Any()).
+			Return([]model.StaleTrip{first, second}, nil),
+		mockRepo.EXPECT().GetStaleTrips(gomock.Any(), gomock.Any()).
+			DoAndReturn(func(ctx context.Context, _ time.Duration) ([]model.StaleTrip, error) {
+				close(scanStarted)
+				<-ctx.Done()
+				scanStopped <- ctx.Err()
+				return nil, ctx.Err()
+			}),
+	)
+	mockGateway.EXPECT().RequestPosition(gomock.Any(), first.DriverID, first.ID).
+		DoAndReturn(func(ctx context.Context, _, _ uuid.UUID) error {
+			close(requestStarted)
+			<-ctx.Done()
+			requestStopped <- ctx.Err()
+			return ctx.Err()
+		})
+
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	svc.Start(ctx)
+	ticks <- time.Now()
+	<-requestStarted
+	ticks <- time.Now()
+	<-scanStarted
 
-	svc.StopScanner()
-	cancel()
-
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer shutdownCancel()
 
-	svc.StopWorkers(shutdownCtx)
+	svc.Shutdown(shutdownCtx)
+	require.ErrorIs(t, shutdownCtx.Err(), context.DeadlineExceeded)
+	require.ErrorIs(t, <-scanStopped, context.Canceled)
+	select {
+	case err := <-requestStopped:
+		require.ErrorIs(t, err, context.Canceled)
+	case <-time.After(time.Second):
+		t.Fatal("push request was not canceled at shutdown deadline")
+	}
 }
 
 func TestPushServiceErrorDoesNotCrashWorker(t *testing.T) {
@@ -246,7 +313,10 @@ func TestScannerNonOverlappingTicks(t *testing.T) {
 	defer ctrl.Finish()
 
 	mockRepo := NewMocktripRepository(ctrl)
-	ticker := newFakeTicker()
+	ticker := NewMockTicker(ctrl)
+	ticks := make(chan time.Time)
+	ticker.EXPECT().Chan().Return((<-chan time.Time)(ticks)).AnyTimes()
+	ticker.EXPECT().Stop()
 	q := positions.NewQueue(10, nil, nil)
 
 	startFirst := make(chan struct{})
@@ -269,15 +339,16 @@ func TestScannerNonOverlappingTicks(t *testing.T) {
 
 	scanner.Start(ctx)
 
-	go func() {
-		ticker.ch <- time.Now()
-	}()
+	ticks <- time.Now()
 	<-startFirst
 
-	ticker.Tick()
-	ticker.Tick()
+	select {
+	case ticks <- time.Now():
+		t.Error("scanner accepted a tick during an active scan")
+	default:
+	}
 
 	close(finishFirst)
-	scanner.Stop()
+	scanner.Stop(context.Background())
 	require.Equal(t, int32(1), callCount.Load())
 }

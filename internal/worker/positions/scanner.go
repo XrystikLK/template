@@ -2,7 +2,6 @@ package positions
 
 import (
 	"context"
-	"sync"
 	"time"
 
 	"go.opentelemetry.io/otel/trace"
@@ -15,8 +14,8 @@ type Scanner struct {
 	staleAfter time.Duration
 	tracer     trace.Tracer
 	logger     logger
-	stopCh     chan struct{}
-	wg         sync.WaitGroup
+	cancel     context.CancelFunc
+	done       chan struct{}
 }
 
 func NewScanner(repo tripRepository, queue *Queue, ticker Ticker, staleAfter time.Duration, tracer trace.Tracer, logger logger) *Scanner {
@@ -27,28 +26,30 @@ func NewScanner(repo tripRepository, queue *Queue, ticker Ticker, staleAfter tim
 		staleAfter: staleAfter,
 		tracer:     tracer,
 		logger:     logger,
-		stopCh:     make(chan struct{}),
 	}
 }
 
 func (s *Scanner) Start(ctx context.Context) {
-	s.wg.Add(1)
+	ctx, s.cancel = context.WithCancel(ctx)
+	s.done = make(chan struct{})
 	go func() {
-		defer s.wg.Done()
+		defer close(s.done)
 		for {
 			select {
 			case <-ctx.Done():
 				return
-			case <-s.stopCh:
-				return
 			case <-s.ticker.Chan():
-				s.scan(ctx)
+				if ctx.Err() == nil {
+					s.scan(ctx)
+				}
 			}
 		}
 	}()
 }
 
 func (s *Scanner) scan(ctx context.Context) {
+	s.queue.beginScan(time.Now())
+	defer s.queue.endScan()
 	var span trace.Span
 	scanCtx := ctx
 	if s.tracer != nil {
@@ -57,6 +58,9 @@ func (s *Scanner) scan(ctx context.Context) {
 	}
 
 	trips, err := s.repo.GetStaleTrips(scanCtx, s.staleAfter)
+	if ctx.Err() != nil {
+		return
+	}
 	if err != nil {
 		if s.logger != nil {
 			s.logger.ErrorContext(scanCtx, "failed to get stale trips", "error", err.Error())
@@ -73,21 +77,26 @@ func (s *Scanner) scan(ctx context.Context) {
 	}
 
 	for _, t := range trips {
+		if scanCtx.Err() != nil {
+			return
+		}
 		task := Task{
 			TripID:      t.ID,
 			DriverID:    t.DriverID,
 			SpanContext: spanCtx,
 		}
-		_ = s.queue.TryPush(scanCtx, task)
+		_ = s.queue.tryPush(scanCtx, task, true)
 	}
 }
 
-func (s *Scanner) Stop() {
+func (s *Scanner) Stop(ctx context.Context) {
 	s.ticker.Stop()
-	select {
-	case <-s.stopCh:
-	default:
-		close(s.stopCh)
+	if s.cancel == nil {
+		return
 	}
-	s.wg.Wait()
+	s.cancel()
+	select {
+	case <-s.done:
+	case <-ctx.Done():
+	}
 }

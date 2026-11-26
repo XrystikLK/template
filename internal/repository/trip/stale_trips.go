@@ -19,7 +19,7 @@ func (r *Repository) GetStaleTrips(ctx context.Context, staleAfter time.Duration
 	staleMicros := staleAfter.Microseconds()
 	query, args, err := r.sq.Select("id", "driver_id", "started_at", "last_position_at").
 		From("trips").
-		Where(squirrel.Eq{statusColumn: string(model.StatusActive)}).
+		Where("status = 'active'").
 		Where(squirrel.Expr("COALESCE(last_position_at, started_at) < now() - (? * interval '1 microsecond')", staleMicros)).
 		OrderBy("COALESCE(last_position_at, started_at) ASC").
 		ToSql()
