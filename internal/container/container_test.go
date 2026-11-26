@@ -17,6 +17,7 @@ func TestContainer_Shutdown_RespectsContextDeadline(t *testing.T) {
 		HTTPReadTimeout: time.Second,
 		ShutdownTimeout: 50 * time.Millisecond,
 		LogLevel:        "info",
+		PushHTTPURL:     "http://localhost:8090",
 	}
 
 	app, err := container.New(context.Background(), cfg)

@@ -2,6 +2,7 @@ package telemetry
 
 import (
 	"context"
+	"sync/atomic"
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
@@ -12,6 +13,15 @@ type Metrics struct {
 	ActiveRequests  metric.Int64UpDownCounter
 	TripsCreated    metric.Int64Counter
 	TripsCompleted  metric.Int64Counter
+	PositionsSaved  metric.Int64Counter
+
+	StaleChecks              metric.Int64Counter
+	StaleRowsRead            metric.Int64Histogram
+	PositionRequests         metric.Int64Counter
+	PositionRequestsDuration metric.Float64Histogram
+
+	queueSize     atomic.Int64
+	activeWorkers atomic.Int64
 }
 
 func NewMetrics(meter metric.Meter) (*Metrics, error) {
@@ -51,12 +61,96 @@ func NewMetrics(meter metric.Meter) (*Metrics, error) {
 		return nil, err
 	}
 
-	return &Metrics{
-		RequestDuration: duration,
-		ActiveRequests:  active,
-		TripsCreated:    created,
-		TripsCompleted:  completed,
-	}, nil
+	saved, err := meter.Int64Counter(
+		"tripgo.positions.saved",
+		metric.WithDescription("Total number of saved positions"),
+		metric.WithUnit("{position}"),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	staleChecks, err := meter.Int64Counter(
+		"tripgo.stale_checks",
+		metric.WithDescription("Total number of stale trip checks"),
+		metric.WithUnit("{check}"),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	posRequests, err := meter.Int64Counter(
+		"tripgo.position_requests",
+		metric.WithDescription("Total number of position requests to push service"),
+		metric.WithUnit("{request}"),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	staleRowsRead, err := meter.Int64Histogram(
+		"tripgo.stale_scan.rows",
+		metric.WithDescription("Number of stale trip rows read in one scan"),
+		metric.WithUnit("{row}"),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	posDuration, err := meter.Float64Histogram(
+		"tripgo.position_requests.duration",
+		metric.WithDescription("Duration of position requests to push service"),
+		metric.WithUnit("s"),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	m := &Metrics{
+		RequestDuration:          duration,
+		ActiveRequests:           active,
+		TripsCreated:             created,
+		TripsCompleted:           completed,
+		PositionsSaved:           saved,
+		StaleChecks:              staleChecks,
+		StaleRowsRead:            staleRowsRead,
+		PositionRequests:         posRequests,
+		PositionRequestsDuration: posDuration,
+	}
+
+	_, err = meter.Int64ObservableGauge(
+		"tripgo.position_requests.queue.size",
+		metric.WithDescription("Current size of the position requests queue"),
+		metric.WithUnit("{task}"),
+		metric.WithInt64Callback(func(_ context.Context, obs metric.Int64Observer) error {
+			obs.Observe(m.queueSize.Load())
+			return nil
+		}),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	_, err = meter.Int64ObservableGauge(
+		"tripgo.position_requests.workers.active",
+		metric.WithDescription("Number of active workers processing position requests"),
+		metric.WithUnit("{worker}"),
+		metric.WithInt64Callback(func(_ context.Context, obs metric.Int64Observer) error {
+			obs.Observe(m.activeWorkers.Load())
+			return nil
+		}),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	return m, nil
+}
+
+func (m *Metrics) RecordStaleRowsRead(ctx context.Context, count int64) {
+	if m != nil && m.StaleRowsRead != nil {
+		m.StaleRowsRead.Record(ctx, count)
+	}
 }
 
 func (m *Metrics) IncTripsCreated(ctx context.Context) {
@@ -68,6 +162,42 @@ func (m *Metrics) IncTripsCreated(ctx context.Context) {
 func (m *Metrics) IncTripsCompleted(ctx context.Context) {
 	if m != nil && m.TripsCompleted != nil {
 		m.TripsCompleted.Add(ctx, 1)
+	}
+}
+
+func (m *Metrics) IncPositionsSaved(ctx context.Context) {
+	if m != nil && m.PositionsSaved != nil {
+		m.PositionsSaved.Add(ctx, 1)
+	}
+}
+
+func (m *Metrics) IncStaleChecks(ctx context.Context, result string) {
+	if m != nil && m.StaleChecks != nil {
+		m.StaleChecks.Add(ctx, 1, metric.WithAttributes(attribute.String("result", result)))
+	}
+}
+
+func (m *Metrics) SetQueueSize(size int64) {
+	if m != nil {
+		m.queueSize.Store(size)
+	}
+}
+
+func (m *Metrics) AddActiveWorkers(delta int64) {
+	if m != nil {
+		m.activeWorkers.Add(delta)
+	}
+}
+
+func (m *Metrics) IncPositionRequests(ctx context.Context, result string) {
+	if m != nil && m.PositionRequests != nil {
+		m.PositionRequests.Add(ctx, 1, metric.WithAttributes(attribute.String("result", result)))
+	}
+}
+
+func (m *Metrics) RecordPositionRequestDuration(ctx context.Context, durationSec float64, result string) {
+	if m != nil && m.PositionRequestsDuration != nil {
+		m.PositionRequestsDuration.Record(ctx, durationSec, metric.WithAttributes(attribute.String("result", result)))
 	}
 }
 

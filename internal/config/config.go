@@ -33,6 +33,14 @@ type Config struct {
 	OtelExporterOtlpProtocol string
 	OtelResourceAttributes   string
 	OtelTracesSampler        string
+
+	PositionCheckInterval time.Duration
+	PositionStaleAfter    time.Duration
+	PositionWorkers       int
+	PositionScanBatchSize int
+	PositionQueueSize     int
+	PushHTTPURL           string
+	PushRequestTimeout    time.Duration
 }
 
 func Load() (*Config, error) {
@@ -134,6 +142,41 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("неподдерживаемый OTEL_TRACES_SAMPLER: %q", sampler)
 	}
 
+	checkInterval, err := parseDurationEnv("POSITION_CHECK_INTERVAL", "30s")
+	if err != nil {
+		return nil, err
+	}
+
+	staleAfter, err := parseDurationEnv("POSITION_STALE_AFTER", "60s")
+	if err != nil {
+		return nil, err
+	}
+
+	workers, err := parsePositiveIntEnv("POSITION_WORKERS", 4)
+	if err != nil {
+		return nil, err
+	}
+
+	queueSize, err := parsePositiveIntEnv("POSITION_QUEUE_SIZE", 100)
+	if err != nil {
+		return nil, err
+	}
+
+	batchSize, err := parsePositiveIntEnv("POSITION_SCAN_BATCH_SIZE", 100)
+	if err != nil {
+		return nil, err
+	}
+
+	pushURL := os.Getenv("PUSH_HTTP_URL")
+	if strings.TrimSpace(pushURL) == "" {
+		pushURL = "http://localhost:8090"
+	}
+
+	pushTimeout, err := parseDurationEnv("PUSH_REQUEST_TIMEOUT", "1s")
+	if err != nil {
+		return nil, err
+	}
+
 	return &Config{
 		HTTPAddr:                 httpAddr,
 		HTTPReadTimeout:          readTimeout,
@@ -154,6 +197,13 @@ func Load() (*Config, error) {
 		OtelExporterOtlpProtocol: protocol,
 		OtelResourceAttributes:   os.Getenv("OTEL_RESOURCE_ATTRIBUTES"),
 		OtelTracesSampler:        sampler,
+		PositionCheckInterval:    checkInterval,
+		PositionStaleAfter:       staleAfter,
+		PositionWorkers:          int(workers),
+		PositionScanBatchSize:    int(batchSize),
+		PositionQueueSize:        int(queueSize),
+		PushHTTPURL:              pushURL,
+		PushRequestTimeout:       pushTimeout,
 	}, nil
 }
 

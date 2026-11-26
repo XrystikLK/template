@@ -7,6 +7,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+const statusColumn = "status"
+
 type Repository struct {
 	pool         *pgxpool.Pool
 	sq           squirrel.StatementBuilderType
